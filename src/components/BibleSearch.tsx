@@ -1,6 +1,6 @@
 /* Composant de recherche et navigation biblique */
-import { useState, useMemo, useCallback } from 'react';
-import { Search, ChevronRight, BookOpen, ListPlus, CheckSquare2, Square } from 'lucide-react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { Search, ChevronRight, BookOpen, ListPlus, CheckSquare2, Square, Clock } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -8,19 +8,59 @@ import { Checkbox } from '@/components/ui/checkbox';
 import type { BibleData, VerseReference } from '@/types/bible';
 import { BIBLE_BOOKS, getChapters, getVerses, getVerseText, searchBible } from '@/lib/bible';
 
+const RECENT_BOOKS_KEY = 'biblecast:recent-books';
+const MAX_RECENT = 5;
+
+function getRecentBooks(): string[] {
+  try { return JSON.parse(localStorage.getItem(RECENT_BOOKS_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function addRecentBook(book: string) {
+  try {
+    const prev = getRecentBooks().filter(b => b !== book);
+    localStorage.setItem(RECENT_BOOKS_KEY, JSON.stringify([book, ...prev].slice(0, MAX_RECENT)));
+  } catch { }
+}
+
+/* C1 — Surbrillance des mots-clés */
+function HighlightText({ text, query }: { text: string; query: string }) {
+  if (!query || query.length < 2) return <>{text}</>;
+  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = text.split(new RegExp(`(${escapedQuery})`, 'gi'));
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === query.toLowerCase()
+          ? <mark key={i} className="bg-primary/25 text-primary rounded-[2px] not-italic font-medium">{part}</mark>
+          : part
+      )}
+    </>
+  );
+}
+
 interface BibleSearchProps {
   bible: BibleData | null;
   onSelectVerse: (verse: VerseReference) => void;
   onProjectVerse?: (verse: VerseReference) => void;
   onAddMultipleVerses?: (verses: VerseReference[]) => void;
+  currentProjectedVerse?: VerseReference | null;
 }
 
-export default function BibleSearch({ bible, onSelectVerse, onProjectVerse, onAddMultipleVerses }: BibleSearchProps) {
+export default function BibleSearch({
+  bible, onSelectVerse, onProjectVerse, onAddMultipleVerses, currentProjectedVerse
+}: BibleSearchProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBook, setSelectedBook] = useState<string | null>(null);
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
   const [mode, setMode] = useState<'books' | 'chapters' | 'verses' | 'search'>('books');
   const [multiSelected, setMultiSelected] = useState<Set<number>>(new Set());
+  const [recentBooks, setRecentBooks] = useState<string[]>(getRecentBooks);
+
+  /* Sync recent books on storage changes */
+  useEffect(() => {
+    setRecentBooks(getRecentBooks());
+  }, [selectedBook]);
 
   const searchResults = useMemo(() => {
     if (!bible || searchQuery.length < 2) return [];
@@ -42,6 +82,8 @@ export default function BibleSearch({ bible, onSelectVerse, onProjectVerse, onAd
     setSelectedChapter(null);
     setMode('chapters');
     setMultiSelected(new Set());
+    addRecentBook(book);
+    setRecentBooks(getRecentBooks());
   }, []);
 
   const handleChapterSelect = useCallback((chapter: number) => {
@@ -94,6 +136,20 @@ export default function BibleSearch({ bible, onSelectVerse, onProjectVerse, onAd
 
   const allSelected = verses.length > 0 && multiSelected.size === verses.length;
 
+  const isCurrentlyProjected = (v: number) =>
+    currentProjectedVerse !== null &&
+    currentProjectedVerse !== undefined &&
+    currentProjectedVerse.book === selectedBook &&
+    currentProjectedVerse.chapter === selectedChapter &&
+    currentProjectedVerse.verse === v;
+
+  const isSearchResultProjected = (r: { book: string; chapter: number; verse: number }) =>
+    currentProjectedVerse !== null &&
+    currentProjectedVerse !== undefined &&
+    currentProjectedVerse.book === r.book &&
+    currentProjectedVerse.chapter === r.chapter &&
+    currentProjectedVerse.verse === r.verse;
+
   return (
     <div className="flex flex-col h-full">
       {/* Barre de recherche */}
@@ -101,7 +157,7 @@ export default function BibleSearch({ bible, onSelectVerse, onProjectVerse, onAd
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Rechercher un verset..."
+            placeholder="Rechercher ou ref. (Jean 3:16)…"
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value);
@@ -142,7 +198,7 @@ export default function BibleSearch({ bible, onSelectVerse, onProjectVerse, onAd
         </div>
       )}
 
-      {/* Toolbar multi-sélection en mode versets */}
+      {/* Toolbar multi-sélection */}
       {mode === 'verses' && (
         <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-secondary/30">
           <button
@@ -166,46 +222,83 @@ export default function BibleSearch({ bible, onSelectVerse, onProjectVerse, onAd
       {/* Contenu */}
       <ScrollArea className="flex-1">
         <div className="p-3">
+
           {/* Mode recherche */}
           {mode === 'search' && (
             <div className="space-y-2">
               {searchResults.length === 0 && searchQuery.length >= 2 && (
                 <p className="text-muted-foreground text-sm text-center py-4">Aucun résultat</p>
               )}
-              {searchResults.map((r, i) => (
-                <button
-                  key={i}
-                  onClick={() => onSelectVerse({ book: r.book, chapter: r.chapter, verse: r.verse, text: r.text })}
-                  onDoubleClick={(e) => {
-                    e.preventDefault();
-                    onProjectVerse?.({ book: r.book, chapter: r.chapter, verse: r.verse, text: r.text });
-                  }}
-                  title="Clic : aperçu — Double-clic : projeter"
-                  className="w-full text-left p-3 rounded-lg bg-secondary/60 hover:bg-surface-hover border border-transparent hover:border-primary/20 transition-smooth"
-                >
-                  <span className="text-primary font-semibold text-sm">
-                    {r.book} {r.chapter}:{r.verse}
-                  </span>
-                  <p className="text-sm text-foreground mt-1 line-clamp-2">{r.text}</p>
-                </button>
-              ))}
+              {searchResults.map((r, i) => {
+                const projected = isSearchResultProjected(r);
+                return (
+                  <button
+                    key={i}
+                    onClick={() => onSelectVerse({ book: r.book, chapter: r.chapter, verse: r.verse, text: r.text })}
+                    onDoubleClick={(e) => {
+                      e.preventDefault();
+                      onProjectVerse?.({ book: r.book, chapter: r.chapter, verse: r.verse, text: r.text });
+                    }}
+                    title="Clic : aperçu — Double-clic : projeter"
+                    className={`w-full text-left p-3 rounded-lg border transition-smooth ${
+                      projected
+                        ? 'bg-primary/10 border-primary/40'
+                        : 'bg-secondary/60 border-transparent hover:bg-surface-hover hover:border-primary/20'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-primary font-semibold text-sm">
+                        {r.book} {r.chapter}:{r.verse}
+                      </span>
+                      {projected && (
+                        <span className="text-[10px] bg-primary text-primary-foreground px-1.5 py-0.5 rounded-full font-bold">
+                          ▶ EN COURS
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-foreground mt-1 line-clamp-2">
+                      <HighlightText text={r.text} query={searchQuery} />
+                    </p>
+                  </button>
+                );
+              })}
             </div>
           )}
 
-          {/* Liste des livres */}
+          {/* Liste des livres — avec livres récents */}
           {mode === 'books' && (
-            <div className="grid grid-cols-2 gap-2">
-              {availableBooks.map(book => (
-                <Button
-                  key={book}
-                  variant="secondary"
-                  className="h-12 justify-start text-sm font-medium transition-smooth hover:border-primary/20 border border-transparent"
-                  onClick={() => handleBookSelect(book)}
-                >
-                  <BookOpen className="h-4 w-4 mr-2 text-primary shrink-0" />
-                  <span className="truncate">{book}</span>
-                </Button>
-              ))}
+            <div className="space-y-4">
+              {recentBooks.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70 uppercase tracking-widest mb-2">
+                    <Clock className="h-3 w-3" /> Récents
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {recentBooks.filter(b => availableBooks.includes(b)).map(book => (
+                      <button
+                        key={book}
+                        onClick={() => handleBookSelect(book)}
+                        className="px-2.5 py-1 text-xs rounded-full bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors"
+                      >
+                        {book}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                {availableBooks.map(book => (
+                  <Button
+                    key={book}
+                    variant="secondary"
+                    className="h-12 justify-start text-sm font-medium transition-smooth hover:border-primary/20 border border-transparent"
+                    onClick={() => handleBookSelect(book)}
+                  >
+                    <BookOpen className="h-4 w-4 mr-2 text-primary shrink-0" />
+                    <span className="truncate">{book}</span>
+                  </Button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -225,19 +318,22 @@ export default function BibleSearch({ bible, onSelectVerse, onProjectVerse, onAd
             </div>
           )}
 
-          {/* Liste des versets avec checkboxes */}
+          {/* Liste des versets */}
           {mode === 'verses' && bible && selectedBook && selectedChapter !== null && (
             <div className="space-y-1.5">
               {verses.map(v => {
                 const text = getVerseText(bible, selectedBook, selectedChapter, v);
                 const isSelected = multiSelected.has(v);
+                const projected = isCurrentlyProjected(v);
                 return (
                   <div
                     key={v}
                     className={`flex items-start gap-2.5 p-3 rounded-lg border transition-smooth ${
-                      isSelected
-                        ? 'bg-primary/10 border-primary/30'
-                        : 'bg-secondary/60 border-transparent hover:bg-surface-hover hover:border-primary/20'
+                      projected
+                        ? 'bg-primary/10 border-primary/40'
+                        : isSelected
+                          ? 'bg-primary/10 border-primary/30'
+                          : 'bg-secondary/60 border-transparent hover:bg-surface-hover hover:border-primary/20'
                     }`}
                   >
                     <Checkbox
@@ -256,7 +352,14 @@ export default function BibleSearch({ bible, onSelectVerse, onProjectVerse, onAd
                       title="Clic : aperçu — Double-clic : projeter"
                       className="flex-1 text-left"
                     >
-                      <span className="text-primary font-bold mr-2">{v}</span>
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="text-primary font-bold">{v}</span>
+                        {projected && (
+                          <span className="text-[9px] bg-primary text-primary-foreground px-1 py-0.5 rounded-full font-bold leading-none">
+                            ▶
+                          </span>
+                        )}
+                      </div>
                       <span className="text-sm text-foreground">{text}</span>
                     </button>
                   </div>

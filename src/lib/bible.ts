@@ -60,9 +60,27 @@ export function formatReference(ref: VerseReference): string {
   return `${ref.book} ${ref.chapter}:${ref.verse}`;
 }
 
-// Recherche par mot-clé (limité à 50 résultats)
+// Recherche par mot-clé ou référence directe (ex: "Jean 3:16"), limité à 50 résultats
 export function searchBible(bible: BibleData, query: string, limit = 50): SearchResult[] {
   if (!query || query.length < 2) return [];
+
+  // Détection de référence directe : "Livre chapitre:verset"
+  const refMatch = query.trim().match(/^(.+?)\s+(\d+):(\d+)\s*$/i);
+  if (refMatch) {
+    const bookQuery = refMatch[1].trim().toLowerCase();
+    const chapter = parseInt(refMatch[2]);
+    const verseNum = parseInt(refMatch[3]);
+    const matchingBook = BIBLE_BOOKS.find(b =>
+      b.toLowerCase() === bookQuery ||
+      b.toLowerCase().startsWith(bookQuery) ||
+      b.toLowerCase().replace(/\s/g, '').startsWith(bookQuery.replace(/\s/g, ''))
+    );
+    if (matchingBook) {
+      const text = getVerseText(bible, matchingBook, chapter, verseNum);
+      if (text) return [{ book: matchingBook, chapter, verse: verseNum, text, highlight: text }];
+    }
+  }
+
   const results: SearchResult[] = [];
   const lowerQuery = query.toLowerCase();
 

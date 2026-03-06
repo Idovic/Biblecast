@@ -9,6 +9,7 @@ interface SplashScreenProps {
 export default function SplashScreen({ loading }: SplashScreenProps) {
   const [dots, setDots] = useState('');
   const [fadeOut, setFadeOut] = useState(false);
+  const [unmounted, setUnmounted] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -20,10 +21,12 @@ export default function SplashScreen({ loading }: SplashScreenProps) {
   useEffect(() => {
     if (!loading) {
       setFadeOut(true);
+      const timer = setTimeout(() => setUnmounted(true), 750);
+      return () => clearTimeout(timer);
     }
   }, [loading]);
 
-  if (!loading && fadeOut) return null;
+  if (unmounted) return null;
 
   return (
     <div
@@ -35,7 +38,6 @@ export default function SplashScreen({ loading }: SplashScreenProps) {
       }}
     >
       <div className="flex flex-col items-center gap-8">
-        {/* Logo */}
         <div className="relative">
           <div className="h-24 w-24 rounded-3xl bg-primary/15 border border-primary/30 flex items-center justify-center shadow-xl shadow-primary/10">
             <BookOpen className="h-12 w-12 text-primary" />
@@ -48,15 +50,11 @@ export default function SplashScreen({ loading }: SplashScreenProps) {
           <p className="text-sm text-muted-foreground">Logiciel de projection liturgique</p>
         </div>
 
-        {/* Barre de progression */}
         <div className="flex flex-col items-center gap-3">
           <div className="w-56 h-1 bg-secondary rounded-full overflow-hidden">
             <div
-              className="h-full bg-primary rounded-full"
-              style={{
-                width: loading ? '70%' : '100%',
-                transition: 'width 800ms ease-out',
-              }}
+              className="h-full bg-primary rounded-full transition-all duration-500"
+              style={{ width: loading ? '70%' : '100%' }}
             />
           </div>
           <p className="text-xs text-muted-foreground/70">

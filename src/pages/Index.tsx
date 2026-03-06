@@ -1,6 +1,6 @@
 /* Page principale — Mode Présentateur */
-import { useState, useEffect, useCallback } from 'react';
-import { Monitor, BookOpen, Image, Layout, Settings, Keyboard } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Monitor, BookOpen, Image, Layout, Settings, Keyboard, MonitorOff } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -9,15 +9,17 @@ import PreviewPanel from '@/components/PreviewPanel';
 import QueuePanel from '@/components/QueuePanel';
 import GalleryPanel from '@/components/GalleryPanel';
 import SlidesEditor from '@/components/SlidesEditor';
-import SettingsPanel from '@/components/SettingsPanel';
+import SettingsPanel, { loadSettings, type ChurchSettings } from '@/components/SettingsPanel';
 import CastButton from '@/components/CastButton';
 import SplashScreen from '@/components/SplashScreen';
-import { useBroadcastSender } from '@/hooks/useBroadcastChannel';
+import { useBroadcastSender, useControlReceiver, getLastTheme } from '@/hooks/useBroadcastChannel';
 import { usePeerHost } from '@/hooks/usePeerSync';
+import { useLocalServer } from '@/hooks/useLocalServer';
+import { useCastSender } from '@/hooks/useCastSender';
 import { loadBible } from '@/lib/bible';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import type { BibleData, VerseReference, CustomSlide, QueueItem, DisplayTheme } from '@/types/bible';
+import type { BibleData, VerseReference, CustomSlide, QueueItem, DisplayTheme, DisplayMessage } from '@/types/bible';
 
 function ColResizeHandle() {
   const [dragging, setDragging] = useState(false);
@@ -61,6 +63,7 @@ export default function Index() {
   const [bibleLoading, setBibleLoading] = useState(true);
   const [selectedVerse, setSelectedVerse] = useState<VerseReference | null>(null);
   const [selectedSlide, setSelectedSlide] = useState<CustomSlide | null>(null);
+  const [projectedVerse, setProjectedVerse] = useState<VerseReference | null>(null);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [history, setHistory] = useState<QueueItem[]>([]);
   const [slides, setSlides] = useState<CustomSlide[]>(() => {
@@ -70,16 +73,29 @@ export default function Index() {
   const [showSettings, setShowSettings] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [currentTimelineId, setCurrentTimelineId] = useState<string | null>(null);
-  const [theme, setTheme] = useState<DisplayTheme>({
-    name: 'Noir classique',
-    className: 'theme-noir-classique',
-    fontSize: 'large',
-    fontFamily: 'serif',
-    bgOpacity: 1,
+  const [settings, setSettings] = useState<ChurchSettings>(loadSettings);
+  const [theme, setTheme] = useState<DisplayTheme>(() => {
+    const saved = getLastTheme();
+    return saved ?? {
+      name: 'Noir classique',
+      className: 'theme-noir-classique',
+      fontSize: 'large',
+      fontFamily: 'serif',
+      bgOpacity: 1,
+    };
   });
+  const autoAdvanceRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastProjectionTimeRef = useRef<number>(Date.now());
+  const timelineNextRef = useRef<() => void>(() => {});
+  const timelinePrevRef = useRef<() => void>(() => {});
 
-  const peer = usePeerHost();
-  const send = useBroadcastSender(peer.peerSend);
+  const peer = usePeerHost(useCallback((msg: DisplayMessage) => {
+    if (msg.type === 'request-next') timelineNextRef.current();
+    else if (msg.type === 'request-prev') timelinePrevRef.current();
+  }, []));
+  const localServer = useLocalServer();
+  const castSender = useCastSender();
+  const send = useBroadcastSender(peer.peerSend, localServer.sendToWs, castSender.castSend);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -103,6 +119,25 @@ export default function Index() {
     localStorage.setItem('biblecast:slides', JSON.stringify(slides));
   }, [slides]);
 
+  /* Polling des paramètres (pour autoAdvance et autres) */
+  useEffect(() => {
+    const interval = setInterval(() => setSettings(loadSettings()), 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  /* Auto-veille */
+  useEffect(() => {
+    if (!settings.autoSleep) return;
+    const check = setInterval(() => {
+      const elapsedMin = (Date.now() - lastProjectionTimeRef.current) / 60000;
+      if (elapsedMin >= settings.autoSleepDelay) {
+        send({ type: 'clear' });
+        lastProjectionTimeRef.current = Date.now();
+      }
+    }, 30000);
+    return () => clearInterval(check);
+  }, [settings.autoSleep, settings.autoSleepDelay, send]);
+
   const handleSelectVerse = useCallback((verse: VerseReference) => {
     setSelectedVerse(verse);
     setSelectedSlide(null);
@@ -118,6 +153,7 @@ export default function Index() {
     send({ type: 'show-verse', verse });
     setSelectedVerse(verse);
     setSelectedSlide(null);
+    setProjectedVerse(verse);
     const item: QueueItem = { id: crypto.randomUUID(), type: 'verse', verse };
     setHistory(prev => [item, ...prev]);
     toast({
@@ -130,10 +166,14 @@ export default function Index() {
   const handleSendToDisplay = useCallback(() => {
     if (selectedVerse) {
       send({ type: 'show-verse', verse: selectedVerse });
+      setProjectedVerse(selectedVerse);
+      lastProjectionTimeRef.current = Date.now();
       const item: QueueItem = { id: crypto.randomUUID(), type: 'verse', verse: selectedVerse };
       setHistory(prev => [item, ...prev]);
     } else if (selectedSlide) {
       send({ type: 'show-slide', slide: selectedSlide });
+      setProjectedVerse(null);
+      lastProjectionTimeRef.current = Date.now();
       const item: QueueItem = { id: crypto.randomUUID(), type: 'slide', slide: selectedSlide };
       setHistory(prev => [item, ...prev]);
     }
@@ -165,11 +205,14 @@ export default function Index() {
       send({ type: 'show-verse', verse: item.verse });
       setSelectedVerse(item.verse);
       setSelectedSlide(null);
+      setProjectedVerse(item.verse);
     } else if (item.type === 'slide' && item.slide) {
       send({ type: 'show-slide', slide: item.slide });
       setSelectedSlide(item.slide);
       setSelectedVerse(null);
+      setProjectedVerse(null);
     }
+    lastProjectionTimeRef.current = Date.now();
     setCurrentTimelineId(item.id);
     setHistory(prev => [item, ...prev]);
   }, [send]);
@@ -191,6 +234,25 @@ export default function Index() {
     const idx = nonSection.findIndex(q => q.id === currentTimelineId);
     if (idx > 0) handleTimelineSendItem(nonSection[idx - 1]);
   }, [queue, currentTimelineId, handleTimelineSendItem]);
+
+  /* Sync refs pour usePeerHost callback (évite dépendances circulaires) */
+  useEffect(() => { timelineNextRef.current = handleTimelineNext; }, [handleTimelineNext]);
+  useEffect(() => { timelinePrevRef.current = handleTimelinePrev; }, [handleTimelinePrev]);
+
+  /* Récepteur canal de contrôle (swipe sur Display même device) */
+  useControlReceiver(useCallback((msg: DisplayMessage) => {
+    if (msg.type === 'request-next') handleTimelineNext();
+    else if (msg.type === 'request-prev') handleTimelinePrev();
+  }, [handleTimelineNext, handleTimelinePrev]));
+
+  /* Auto-advance de la timeline */
+  useEffect(() => {
+    if (autoAdvanceRef.current) clearInterval(autoAdvanceRef.current);
+    if (settings.autoAdvance && currentTimelineId) {
+      autoAdvanceRef.current = setInterval(() => handleTimelineNext(), settings.autoAdvanceDelay ?? 5000);
+    }
+    return () => { if (autoAdvanceRef.current) clearInterval(autoAdvanceRef.current); };
+  }, [settings.autoAdvance, settings.autoAdvanceDelay, currentTimelineId, handleTimelineNext]);
 
   const handleRemoveFromQueue = useCallback((id: string) => {
     setQueue(prev => prev.filter(q => q.id !== id));
@@ -244,6 +306,15 @@ export default function Index() {
       sectionName: name,
       sectionColor: color,
     }]);
+  }, []);
+
+  const handleQueueReorder = useCallback((from: number, to: number) => {
+    setQueue(prev => {
+      const arr = [...prev];
+      const [moved] = arr.splice(from, 1);
+      arr.splice(to, 0, moved);
+      return arr;
+    });
   }, []);
 
   const handleApplyToSlide = useCallback((imageUrl: string) => {
@@ -317,6 +388,10 @@ export default function Index() {
               displayUrl={peer.displayUrl}
               connectedCount={peer.connectedCount}
               isReady={peer.isReady}
+              localServer={localServer}
+              castState={castSender.castState}
+              onRequestCast={castSender.requestCast}
+              onEndCast={castSender.endCast}
             />
             <Button
               size="sm" variant="ghost"
@@ -328,6 +403,14 @@ export default function Index() {
             </Button>
             <Button
               size="sm" variant="ghost"
+              className="gap-1.5 text-muted-foreground hover:text-destructive/80 transition-smooth"
+              onClick={handleClearDisplay}
+              title="Écran de veille — vider l'écran Display (Échap)"
+            >
+              <MonitorOff className="h-4 w-4" />
+            </Button>
+            <Button
+              size="sm" variant="ghost"
               className="gap-1.5 text-muted-foreground hover:text-foreground transition-smooth"
               onClick={() => setShowSettings(true)}
             >
@@ -336,7 +419,7 @@ export default function Index() {
             <Button
               size="sm" variant="secondary"
               className="gap-2 transition-smooth border border-border/50 hover:border-primary/30"
-              onClick={() => window.open('/display', '_blank')}
+              onClick={() => window.open(`/display?room=${peer.roomCode}`, '_blank')}
             >
               <Monitor className="h-4 w-4" />
               Ouvrir l'écran
@@ -392,6 +475,7 @@ export default function Index() {
                   onSelectVerse={handleSelectVerse}
                   onProjectVerse={handleProjectVerse}
                   onAddMultipleVerses={handleAddMultipleVerses}
+                  currentProjectedVerse={projectedVerse}
                 />
               </TabsContent>
 
@@ -453,6 +537,7 @@ export default function Index() {
               onNext={handleTimelineNext}
               onPrev={handleTimelinePrev}
               onAddSection={handleAddSection}
+              onQueueReorder={handleQueueReorder}
             />
           </Panel>
 

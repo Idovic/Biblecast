@@ -41,7 +41,7 @@ export interface QueueItem {
 }
 
 export interface DisplayMessage {
-  type: 'show-verse' | 'show-slide' | 'clear' | 'theme-change';
+  type: 'show-verse' | 'show-slide' | 'clear' | 'theme-change' | 'request-next' | 'request-prev';
   verse?: VerseReference;
   slide?: CustomSlide;
   theme?: DisplayTheme;

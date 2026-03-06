@@ -1,6 +1,6 @@
 /* Panneau Paramètres de l'église — sauvegarde localStorage */
 import { useState, useEffect } from 'react';
-import { X, Upload, Church, Monitor, Type, Layers, Eye, Timer, Sparkles } from 'lucide-react';
+import { X, Upload, Church, Monitor, Type, Layers, Eye, Timer, Sparkles, Clock, BookOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,6 +21,12 @@ export interface ChurchSettings {
   lineSpacing: 'tight' | 'normal' | 'relaxed';
   verseQuotes: boolean;
   displayBgBlur: boolean;
+  showClock: boolean;
+  showVerseOfDay: boolean;
+  verseOfDayMode: 'random' | 'manual';
+  verseOfDayRef: string;
+  autoSleep: boolean;
+  autoSleepDelay: number;
 }
 
 const STORAGE_KEY = 'biblecast-settings';
@@ -39,6 +45,12 @@ const DEFAULT_SETTINGS: ChurchSettings = {
   lineSpacing: 'normal',
   verseQuotes: true,
   displayBgBlur: false,
+  showClock: true,
+  showVerseOfDay: true,
+  verseOfDayMode: 'random',
+  verseOfDayRef: '',
+  autoSleep: false,
+  autoSleepDelay: 5,
 };
 
 export function loadSettings(): ChurchSettings {
@@ -260,6 +272,75 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                   label="Flou d'arrière-plan sur fond sombre" />
               </div>
             </div>
+
+            <div className="space-y-3">
+              <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Clock className="h-3.5 w-3.5" /> Écran de veille
+              </Label>
+              <div className="bg-secondary/40 rounded-xl p-4 space-y-4">
+                <Toggle checked={settings.showClock} onChange={v => set('showClock', v)}
+                  label="Afficher l'horloge (HH:MM)" />
+                <div className="space-y-2">
+                  <Toggle checked={settings.autoSleep} onChange={v => set('autoSleep', v)}
+                    label="Veille automatique" />
+                  {settings.autoSleep && (
+                    <div className="pl-4 border-l-2 border-primary/20">
+                      <Label className="text-[10px] text-muted-foreground mb-2 block">
+                        Passer en veille après (sans projection)
+                      </Label>
+                      <div className="flex gap-2 flex-wrap">
+                        {[1, 3, 5, 10, 15].map(m => (
+                          <button key={m} onClick={() => set('autoSleepDelay', m)}
+                            className={cn('px-3 py-1.5 rounded-lg border text-xs transition-all',
+                              settings.autoSleepDelay === m
+                                ? 'border-primary/50 bg-primary/10 text-foreground font-medium'
+                                : 'border-border/40 bg-secondary/60 text-muted-foreground hover:bg-secondary'
+                            )}>
+                            {m} min
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-3">
+                  <Toggle checked={settings.showVerseOfDay} onChange={v => set('showVerseOfDay', v)}
+                    label="Verset du jour" />
+                  {settings.showVerseOfDay && (
+                    <div className="pl-4 border-l-2 border-primary/20 space-y-3">
+                      <div className="flex gap-2">
+                        {(['random', 'manual'] as const).map(mode => (
+                          <button key={mode}
+                            onClick={() => set('verseOfDayMode', mode)}
+                            className={cn(
+                              'flex-1 py-1.5 px-3 rounded-lg border text-xs transition-all',
+                              settings.verseOfDayMode === mode
+                                ? 'border-primary/50 bg-primary/10 text-foreground font-medium'
+                                : 'border-border/40 bg-secondary/60 text-muted-foreground hover:bg-secondary'
+                            )}>
+                            <BookOpen className="h-3 w-3 inline mr-1.5" />
+                            {mode === 'random' ? 'Aléatoire (quotidien)' : 'Manuel'}
+                          </button>
+                        ))}
+                      </div>
+                      {settings.verseOfDayMode === 'manual' && (
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground mb-1 block">
+                            Référence (ex : Jean 3:16)
+                          </Label>
+                          <Input
+                            value={settings.verseOfDayRef}
+                            onChange={e => set('verseOfDayRef', e.target.value)}
+                            placeholder="Jean 3:16"
+                            className="bg-secondary text-sm h-8"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </TabsContent>
 
           {/* ── Onglet Présentation ── */}
@@ -310,6 +391,11 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           </TabsContent>
         </Tabs>
 
+        <div className="px-6 py-3 border-t border-border/40 text-center">
+          <p className="text-[10px] text-muted-foreground/40">
+            Développé avec ❤️ par le Frère Malachie
+          </p>
+        </div>
         <div className="px-6 py-4 border-t border-border flex justify-end shrink-0">
           <Button onClick={onClose} className="btn-gold px-6">Fermer</Button>
         </div>

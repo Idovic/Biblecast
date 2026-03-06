@@ -249,8 +249,8 @@ export default function SlidesEditor({ slides, onSlidesChange, onSelectSlide, on
       <PanelGroup direction="horizontal" className="flex-1 overflow-hidden">
         {/* Liste des slides */}
         <Panel defaultSize={42} minSize={25} maxSize={65} className="overflow-hidden">
-          <ScrollArea className="h-full">
-            <div className="p-2 space-y-1.5">
+          <div className="h-full overflow-y-auto overflow-x-hidden">
+            <div className="p-2 space-y-1.5 w-full">
               {slides.length === 0 && (
                 <p className="text-muted-foreground text-xs text-center py-8 px-2">Aucune slide.<br />Cliquez "Nouvelle slide".</p>
               )}
@@ -267,7 +267,7 @@ export default function SlidesEditor({ slides, onSlidesChange, onSelectSlide, on
                     onDragEnd={handleDragEnd}
                     onClick={() => { setEditingId(slide.id); onSelectSlide(slide); }}
                     className={cn(
-                      'p-2.5 rounded-lg cursor-pointer transition-all select-none',
+                      'p-2.5 rounded-lg cursor-pointer transition-all select-none overflow-hidden w-full',
                       editingId === slide.id ? 'bg-primary/15 border border-primary/40' : 'bg-secondary/60 hover:bg-surface-hover border border-transparent',
                       dragOverId === slide.id && 'border-primary border-dashed opacity-60'
                     )}
@@ -279,13 +279,11 @@ export default function SlidesEditor({ slides, onSlidesChange, onSelectSlide, on
                         {slide.title || <span className="italic opacity-50">Sans titre</span>}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${TYPE_COLORS[sType]}`}>{TYPE_LABELS[sType]}</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[10px] text-muted-foreground truncate">
-                          {sType === 'bullet-list' ? (slide.bullets || []).filter(Boolean).join(' · ') : slide.content || ''}
-                        </p>
-                      </div>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${TYPE_COLORS[sType]}`}>{TYPE_LABELS[sType]}</span>
+                      <p className="text-[10px] text-muted-foreground truncate flex-1 min-w-0">
+                        {sType === 'bullet-list' ? (slide.bullets || []).filter(Boolean).join(' · ') : slide.content || ''}
+                      </p>
                       <div className="flex gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
                         <Button size="icon" variant="ghost" className="h-6 w-6 text-primary" onClick={() => onSendSlide(slide)}><Send className="h-3 w-3" /></Button>
                         <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={() => duplicateSlide(slide)}><Copy className="h-3 w-3" /></Button>
@@ -296,7 +294,7 @@ export default function SlidesEditor({ slides, onSlidesChange, onSelectSlide, on
                 );
               })}
             </div>
-          </ScrollArea>
+          </div>
         </Panel>
 
         <ColResizeHandle />

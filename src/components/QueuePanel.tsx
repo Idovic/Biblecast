@@ -1,12 +1,13 @@
 /* Timeline de présentation — versets, slides et sections */
-import { useState } from 'react';
-import { X, Send, Clock, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Layers, History, Plus, Play } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { X, Send, Clock, ChevronLeft, ChevronRight, Layers, History, Plus, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import type { QueueItem, SlideType } from '@/types/bible';
 import { formatReference } from '@/lib/bible';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { cn } from '@/lib/utils';
 
 interface QueuePanelProps {
   queue: QueueItem[];
@@ -20,6 +21,7 @@ interface QueuePanelProps {
   onNext: () => void;
   onPrev: () => void;
   onAddSection: (name: string, color: string) => void;
+  onQueueReorder?: (fromIndex: number, toIndex: number) => void;
 }
 
 const SECTION_COLORS = ['#f4a261', '#e63946', '#457b9d', '#2a9d8f', '#8338ec', '#fb8500'];
@@ -66,11 +68,13 @@ function getItemTypeLabel(item: QueueItem): string {
 
 export default function QueuePanel({
   queue, history, currentId, onSendItem, onRemoveFromQueue,
-  onMoveUp, onMoveDown, onResend, onNext, onPrev, onAddSection
+  onMoveUp, onMoveDown, onResend, onNext, onPrev, onAddSection, onQueueReorder
 }: QueuePanelProps) {
   const [showSectionForm, setShowSectionForm] = useState(false);
   const [sectionName, setSectionName] = useState('');
   const [sectionColor, setSectionColor] = useState(SECTION_COLORS[0]);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const dragItemRef = useRef<string | null>(null);
 
   const nonSectionItems = queue.filter(q => q.type !== 'section');
   const currentIdx = currentId ? nonSectionItems.findIndex(q => q.id === currentId) : -1;
@@ -82,6 +86,19 @@ export default function QueuePanel({
     setSectionName('');
     setShowSectionForm(false);
   };
+
+  const handleDragStart = (id: string) => { dragItemRef.current = id; };
+  const handleDragOver = (e: React.DragEvent, id: string) => { e.preventDefault(); setDragOverId(id); };
+  const handleDrop = (targetId: string) => {
+    const fromId = dragItemRef.current;
+    if (!fromId || fromId === targetId) { setDragOverId(null); return; }
+    const fromIndex = queue.findIndex(q => q.id === fromId);
+    const toIndex = queue.findIndex(q => q.id === targetId);
+    if (fromIndex !== -1 && toIndex !== -1) onQueueReorder?.(fromIndex, toIndex);
+    setDragOverId(null);
+    dragItemRef.current = null;
+  };
+  const handleDragEnd = () => { setDragOverId(null); dragItemRef.current = null; };
 
   return (
     <Tabs defaultValue="timeline" className="flex flex-col h-full">
@@ -171,7 +188,7 @@ export default function QueuePanel({
               </p>
             )}
 
-            {queue.map((item, i) => {
+            {queue.map((item) => {
               /* --- Section divider --- */
               if (item.type === 'section') {
                 return (
@@ -198,36 +215,31 @@ export default function QueuePanel({
               const isCurrent = item.id === currentId;
               const typeColor = getItemTypeColor(item);
               const typeLabel = getItemTypeLabel(item);
+              const isDragOver = dragOverId === item.id;
 
               return (
                 <div
                   key={item.id}
-                  className={`flex items-start gap-1.5 p-2.5 rounded-lg border transition-all group ${
+                  draggable
+                  onDragStart={() => handleDragStart(item.id)}
+                  onDragOver={(e) => handleDragOver(e, item.id)}
+                  onDrop={() => handleDrop(item.id)}
+                  onDragEnd={handleDragEnd}
+                  className={cn(
+                    'flex items-start gap-1.5 p-2.5 rounded-lg border transition-all group select-none',
                     isCurrent
                       ? 'bg-primary/15 border-primary/50 shadow-[0_0_0_1px_hsl(var(--primary)/0.2)]'
-                      : 'bg-secondary/60 border-transparent hover:border-primary/15'
-                  }`}
+                      : 'bg-secondary/60 border-transparent hover:border-primary/15',
+                    isDragOver && 'border-primary border-dashed opacity-60'
+                  )}
                 >
-                  {/* Current indicator / reorder buttons */}
-                  {isCurrent ? (
-                    <Play className="h-3.5 w-3.5 text-primary mt-0.5 shrink-0 fill-primary" />
-                  ) : (
-                    <div className="flex flex-col gap-0.5 mt-0.5">
-                      <button
-                        onClick={() => onMoveUp(item.id)}
-                        disabled={i === 0}
-                        className="text-muted-foreground hover:text-primary disabled:opacity-20 transition-smooth"
-                      >
-                        <ChevronUp className="h-3 w-3" />
-                      </button>
-                      <button
-                        onClick={() => onMoveDown(item.id)}
-                        disabled={i >= queue.length - 1}
-                        className="text-muted-foreground hover:text-primary disabled:opacity-20 transition-smooth"
-                      >
-                        <ChevronDown className="h-3 w-3" />
-                      </button>
-                    </div>
+                  {/* Grip drag handle */}
+                  <div className="flex items-center mt-1 cursor-grab active:cursor-grabbing shrink-0 text-muted-foreground/40 hover:text-muted-foreground transition-colors">
+                    <GripVertical className="h-4 w-4" />
+                  </div>
+
+                  {isCurrent && (
+                    <span className="text-primary mt-1 shrink-0">▶</span>
                   )}
 
                   <div className="flex-1 min-w-0">
