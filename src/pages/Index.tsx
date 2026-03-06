@@ -419,7 +419,7 @@ export default function Index() {
             <Button
               size="sm" variant="secondary"
               className="gap-2 transition-smooth border border-border/50 hover:border-primary/30"
-              onClick={() => window.open(`/display?room=${peer.roomCode}`, '_blank')}
+              onClick={() => window.open(`${import.meta.env.BASE_URL}display?room=${peer.roomCode}`, '_blank')}
             >
               <Monitor className="h-4 w-4" />
               Ouvrir l'écran

@@ -6,7 +6,7 @@ let bibleCache: BibleData | null = null;
 // Charger la Bible depuis le fichier JSON
 export async function loadBible(): Promise<BibleData> {
   if (bibleCache) return bibleCache;
-  const response = await fetch('/bible-fr.json');
+  const response = await fetch(import.meta.env.BASE_URL + 'bible-fr.json');
   bibleCache = await response.json();
   return bibleCache!;
 }
