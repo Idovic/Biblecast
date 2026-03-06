@@ -1,6 +1,5 @@
 /* Types pour BibleCast */
 
-// Structure du fichier bible-fr.json
 export interface BibleData {
   [bookName: string]: {
     [chapter: string]: {
@@ -9,7 +8,6 @@ export interface BibleData {
   };
 }
 
-// Référence d'un verset sélectionné
 export interface VerseReference {
   book: string;
   chapter: number;
@@ -17,24 +15,31 @@ export interface VerseReference {
   text: string;
 }
 
-// Slide personnalisée
+export type SlideType = 'text-title' | 'title-only' | 'verse-title' | 'blank' | 'bullet-list';
+
 export interface CustomSlide {
   id: string;
   title: string;
   content: string;
+  slideType: SlideType;
+  bullets?: string[];
+  textColor?: string;
   backgroundColor?: string;
-  backgroundImage?: string; // base64 data URL
+  backgroundGradient?: string;
+  backgroundImage?: string;
+  textShadow?: boolean;
+  showLogo?: boolean;
 }
 
-// Élément dans la file d'attente (verset ou slide)
 export interface QueueItem {
   id: string;
-  type: 'verse' | 'slide';
+  type: 'verse' | 'slide' | 'section';
   verse?: VerseReference;
   slide?: CustomSlide;
+  sectionName?: string;
+  sectionColor?: string;
 }
 
-// Message envoyé via BroadcastChannel
 export interface DisplayMessage {
   type: 'show-verse' | 'show-slide' | 'clear' | 'theme-change';
   verse?: VerseReference;
@@ -42,20 +47,20 @@ export interface DisplayMessage {
   theme?: DisplayTheme;
 }
 
-// Thème d'affichage
 export interface DisplayTheme {
   name: string;
   className: string;
   fontSize: 'small' | 'medium' | 'large' | 'xlarge';
   fontFamily: 'serif' | 'sans-serif';
   bgOpacity: number;
+  verseBackgroundImage?: string;
+  showChurchLogo?: boolean;
 }
 
-// Résultat de recherche
 export interface SearchResult {
   book: string;
   chapter: number;
   verse: number;
   text: string;
-  highlight: string; // texte avec mise en évidence
+  highlight: string;
 }
