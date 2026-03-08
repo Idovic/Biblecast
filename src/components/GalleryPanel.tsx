@@ -124,9 +124,14 @@ export default function GalleryPanel({
   const settings = loadSettings();
 
   useEffect(() => {
-    fetch('/backgrounds/index.json')
+    fetch(import.meta.env.BASE_URL + 'backgrounds/index.json')
       .then(r => r.json())
-      .then(setPresetImages)
+      .then((imgs: GalleryImage[]) =>
+        setPresetImages(imgs.map(img => ({
+          ...img,
+          url: img.url.startsWith('/') ? import.meta.env.BASE_URL.replace(/\/$/, '') + img.url : img.url,
+        })))
+      )
       .catch(() => setPresetImages([]));
   }, []);
 
