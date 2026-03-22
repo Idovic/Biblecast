@@ -4,8 +4,8 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import type { DisplayMessage } from '@/types/bible';
 
-const HTTP_PORT = 8090;
-const WS_PORT = 8091;
+export const HTTP_PORT = 8090;
+export const WS_PORT = 8091;
 const IP_CACHE_KEY = 'biblecast:local-ip';
 
 interface LocalServerPlugin {

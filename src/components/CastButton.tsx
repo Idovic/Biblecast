@@ -32,8 +32,8 @@ export default function CastButton({
 
   const isPeerConnected = connectedCount > 0;
 
-  const offlineUrl = localServer?.httpUrl && localServer?.wsUrl
-    ? `${localServer.httpUrl}/display?ws=${encodeURIComponent(localServer.wsUrl)}`
+  const offlineUrl = localServer?.httpUrl
+    ? `${localServer.httpUrl}/display?local=1`
     : null;
 
   const displayedOfflineUrl = offlineUrl ?? savedOfflineUrl;

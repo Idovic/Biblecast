@@ -3,6 +3,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useBroadcastReceiver, useControlSender, getLastDisplay, getLastTheme } from '@/hooks/useBroadcastChannel';
 import { usePeerGuest, useLocalWsGuest } from '@/hooks/usePeerSync';
+import { WS_PORT } from '@/hooks/useLocalServer';
 import type { VerseReference, CustomSlide, DisplayTheme, DisplayMessage, SlideType } from '@/types/bible';
 import { formatReference, loadBible, getVerse, getChapters, getVerses, BIBLE_BOOKS } from '@/lib/bible';
 import { loadSettings, type ChurchSettings } from '@/components/SettingsPanel';
@@ -99,7 +100,10 @@ function formatClockDate(now: Date): string {
 export default function Display() {
   const [searchParams] = useSearchParams();
   const roomCode = searchParams.get('room');
-  const wsParam = searchParams.get('ws');
+  const wsParam = searchParams.get('ws')
+    ?? (searchParams.get('local') === '1'
+      ? `ws://${window.location.hostname}:${WS_PORT}`
+      : null);
 
   const [verse, setVerse] = useState<VerseReference | null>(null);
   const [verse2, setVerse2] = useState<VerseReference | null>(null);
