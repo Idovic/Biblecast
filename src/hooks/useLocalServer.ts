@@ -6,6 +6,7 @@ import type { DisplayMessage } from '@/types/bible';
 
 const HTTP_PORT = 8090;
 const WS_PORT = 8091;
+const IP_CACHE_KEY = 'biblecast:local-ip';
 
 interface LocalServerPlugin {
   startServer(options: { httpPort: number; wsPort: number }): Promise<{ success: boolean }>;
@@ -20,6 +21,14 @@ interface LocalServerPlugin {
 
 const LocalServerPlugin = registerPlugin<LocalServerPlugin>('LocalServer');
 
+function getCachedIP(): string | null {
+  try { return localStorage.getItem(IP_CACHE_KEY); } catch { return null; }
+}
+
+function cacheIP(ip: string) {
+  try { localStorage.setItem(IP_CACHE_KEY, ip); } catch { }
+}
+
 export interface LocalServerState {
   isNative: boolean;
   isServerRunning: boolean;
@@ -32,7 +41,7 @@ export interface LocalServerState {
 export function useLocalServer(): LocalServerState {
   const isNative = Capacitor.isNativePlatform();
   const [isServerRunning, setIsServerRunning] = useState(false);
-  const [localIP, setLocalIP] = useState<string | null>(null);
+  const [localIP, setLocalIP] = useState<string | null>(() => getCachedIP());
   const listenerRef = useRef<{ remove: () => void } | null>(null);
 
   const sendToWs = useCallback((msg: DisplayMessage) => {
@@ -52,11 +61,22 @@ export function useLocalServer(): LocalServerState {
         await LocalServerPlugin.startServer({ httpPort: HTTP_PORT, wsPort: WS_PORT });
         const result = await LocalServerPlugin.getLocalIP();
         if (!cancelled) {
+          const ip = result.ip || null;
+          if (ip) {
+            cacheIP(ip);
+            setLocalIP(ip);
+          }
           setIsServerRunning(true);
-          setLocalIP(result.ip || null);
         }
       } catch (err) {
         console.warn('[LocalServer] démarrage échoué:', err);
+        if (!cancelled) {
+          const cached = getCachedIP();
+          if (cached) {
+            setLocalIP(cached);
+            setIsServerRunning(true);
+          }
+        }
       }
     })();
 

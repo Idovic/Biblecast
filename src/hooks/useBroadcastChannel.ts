@@ -10,16 +10,13 @@ const THEME_KEY = 'biblecast:theme';
 
 export function useBroadcastSender(
   peerSend?: (msg: DisplayMessage) => void,
-  localWsSend?: (msg: DisplayMessage) => void,
-  castSend?: (msg: DisplayMessage) => void
+  localWsSend?: (msg: DisplayMessage) => void
 ) {
   const channelRef = useRef<BroadcastChannel | null>(null);
   const peerSendRef = useRef(peerSend);
   const localWsSendRef = useRef(localWsSend);
-  const castSendRef = useRef(castSend);
   peerSendRef.current = peerSend;
   localWsSendRef.current = localWsSend;
-  castSendRef.current = castSend;
 
   useEffect(() => {
     channelRef.current = new BroadcastChannel(CHANNEL_NAME);
@@ -30,9 +27,13 @@ export function useBroadcastSender(
     channelRef.current?.postMessage(message);
     peerSendRef.current?.(message);
     localWsSendRef.current?.(message);
-    castSendRef.current?.(message);
     try {
-      if (message.type === 'show-verse' || message.type === 'show-slide' || message.type === 'clear') {
+      if (
+        message.type === 'show-verse' ||
+        message.type === 'show-slide' ||
+        message.type === 'clear' ||
+        message.type === 'show-dual-verse'
+      ) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(message));
       }
       if (message.type === 'theme-change' && message.theme) {
@@ -54,7 +55,6 @@ export function useBroadcastReceiver(onMessage: (msg: DisplayMessage) => void) {
   }, []);
 }
 
-/* Canal de contrôle inverse : Display → Index (swipe, etc.) */
 export function useControlSender() {
   const channelRef = useRef<BroadcastChannel | null>(null);
   useEffect(() => {

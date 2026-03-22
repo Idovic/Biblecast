@@ -1,11 +1,12 @@
 /* Panneau Paramètres de l'église — sauvegarde localStorage */
-import { useState, useEffect } from 'react';
-import { X, Upload, Church, Monitor, Type, Layers, Eye, Timer, Sparkles, Clock, BookOpen } from 'lucide-react';
+import { useState } from 'react';
+import { X, Upload, Church, Monitor, Type, Layers, Eye, Timer, Sparkles, Clock, BookOpen, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
+import { importBDS, clearBDSCache } from '@/lib/bible';
 
 export interface ChurchSettings {
   churchName: string;
@@ -14,6 +15,7 @@ export interface ChurchSettings {
   defaultFontSize: 'normal' | 'large' | 'xlarge';
   transitionSpeed: number;
   bibleVersion: string;
+  bible2Version: string;
   showVerseReference: boolean;
   textShadowDefault: boolean;
   autoAdvance: boolean;
@@ -22,22 +24,27 @@ export interface ChurchSettings {
   verseQuotes: boolean;
   displayBgBlur: boolean;
   showClock: boolean;
+  showClockSeconds: boolean;
+  showClockDate: boolean;
   showVerseOfDay: boolean;
   verseOfDayMode: 'random' | 'manual';
   verseOfDayRef: string;
   autoSleep: boolean;
   autoSleepDelay: number;
+  splitLayout: 'horizontal' | 'vertical';
+  keepScreenOn: boolean;
 }
 
 const STORAGE_KEY = 'biblecast-settings';
 
-const DEFAULT_SETTINGS: ChurchSettings = {
+export const DEFAULT_SETTINGS: ChurchSettings = {
   churchName: '',
   churchLogo: '',
   defaultFont: 'Merriweather',
   defaultFontSize: 'large',
   transitionSpeed: 600,
   bibleVersion: 'LSG 1910',
+  bible2Version: 'BDS',
   showVerseReference: true,
   textShadowDefault: false,
   autoAdvance: false,
@@ -46,11 +53,15 @@ const DEFAULT_SETTINGS: ChurchSettings = {
   verseQuotes: true,
   displayBgBlur: false,
   showClock: true,
+  showClockSeconds: false,
+  showClockDate: false,
   showVerseOfDay: true,
   verseOfDayMode: 'random',
   verseOfDayRef: '',
   autoSleep: false,
   autoSleepDelay: 5,
+  splitLayout: 'horizontal',
+  keepScreenOn: false,
 };
 
 export function loadSettings(): ChurchSettings {
@@ -108,15 +119,18 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 
 interface SettingsPanelProps {
   onClose: () => void;
+  onBible2Imported?: () => void;
 }
 
-export default function SettingsPanel({ onClose }: SettingsPanelProps) {
+export default function SettingsPanel({ onClose, onBible2Imported }: SettingsPanelProps) {
   const [settings, setSettings] = useState<ChurchSettings>(loadSettings);
+  const [bdsStatus, setBdsStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
-  useEffect(() => { saveSettings(settings); }, [settings]);
-
-  const set = <K extends keyof ChurchSettings>(key: K, val: ChurchSettings[K]) =>
-    setSettings(prev => ({ ...prev, [key]: val }));
+  const set = <K extends keyof ChurchSettings>(key: K, val: ChurchSettings[K]) => {
+    const updated = { ...settings, [key]: val };
+    setSettings(updated);
+    saveSettings(updated);
+  };
 
   const handleLogoUpload = () => {
     const input = document.createElement('input');
@@ -125,9 +139,46 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
     input.onchange = (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
+      if (file.size > 300 * 1024) {
+        const proceed = window.confirm(
+          `Ce logo fait ${Math.round(file.size / 1024)} Ko. Pour éviter un problème de stockage, privilégiez une image de moins de 300 Ko (PNG transparent recommandé). Continuer quand même ?`
+        );
+        if (!proceed) return;
+      }
       const reader = new FileReader();
       reader.onload = (ev) => set('churchLogo', ev.target?.result as string);
       reader.readAsDataURL(file);
+    };
+    input.click();
+  };
+
+  const handleBDSImport = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target?.result as string);
+          if (typeof data === 'object' && !Array.isArray(data)) {
+            importBDS(data);
+            clearBDSCache();
+            setBdsStatus('success');
+            onBible2Imported?.();
+            setTimeout(() => setBdsStatus('idle'), 3000);
+          } else {
+            setBdsStatus('error');
+            setTimeout(() => setBdsStatus('idle'), 3000);
+          }
+        } catch {
+          setBdsStatus('error');
+          setTimeout(() => setBdsStatus('idle'), 3000);
+        }
+      };
+      reader.readAsText(file);
     };
     input.click();
   };
@@ -138,7 +189,6 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="w-full max-w-lg glass-panel rounded-2xl shadow-2xl border border-border/50 overflow-hidden animate-fade-in">
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
           <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
             <Church className="h-5 w-5 text-primary" />
@@ -156,6 +206,9 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
             </TabsTrigger>
             <TabsTrigger value="display" className="flex-1 text-xs gap-1 data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
               <Monitor className="h-3.5 w-3.5" /> Affichage
+            </TabsTrigger>
+            <TabsTrigger value="bible2" className="flex-1 text-xs gap-1 data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
+              <Database className="h-3.5 w-3.5" /> Bibles
             </TabsTrigger>
             <TabsTrigger value="presentation" className="flex-1 text-xs gap-1 data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
               <Layers className="h-3.5 w-3.5" /> Présentation
@@ -198,7 +251,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
 
             <div className="space-y-2">
               <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <Type className="h-3.5 w-3.5" /> Version biblique affichée
+                <Type className="h-3.5 w-3.5" /> Version biblique principale
               </Label>
               <Input value={settings.bibleVersion}
                 onChange={(e) => set('bibleVersion', e.target.value)}
@@ -269,7 +322,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <Toggle checked={settings.textShadowDefault} onChange={v => set('textShadowDefault', v)}
                   label="Ombre du texte par défaut" />
                 <Toggle checked={settings.displayBgBlur} onChange={v => set('displayBgBlur', v)}
-                  label="Flou d'arrière-plan sur fond sombre" />
+                  label="Flou d'arrière-plan sur fond image" />
               </div>
             </div>
 
@@ -279,7 +332,15 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
               </Label>
               <div className="bg-secondary/40 rounded-xl p-4 space-y-4">
                 <Toggle checked={settings.showClock} onChange={v => set('showClock', v)}
-                  label="Afficher l'horloge (HH:MM)" />
+                  label="Afficher l'horloge" />
+                {settings.showClock && (
+                  <div className="pl-4 border-l-2 border-primary/20 space-y-2">
+                    <Toggle checked={settings.showClockSeconds} onChange={v => set('showClockSeconds', v)}
+                      label="Afficher les secondes (HH:MM:SS)" />
+                    <Toggle checked={settings.showClockDate} onChange={v => set('showClockDate', v)}
+                      label="Afficher la date sous l'horloge" />
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Toggle checked={settings.autoSleep} onChange={v => set('autoSleep', v)}
                     label="Veille automatique" />
@@ -343,8 +404,72 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
             </div>
           </TabsContent>
 
+          {/* ── Onglet Bibles ── */}
+          <TabsContent value="bible2" className="overflow-y-auto px-6 py-4 space-y-5">
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <BookOpen className="h-3.5 w-3.5" /> Bible secondaire (double version)
+              </Label>
+              <div className="bg-secondary/40 rounded-xl p-4 space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-[10px] text-muted-foreground">Nom affiché de la 2ème version</Label>
+                  <Input value={settings.bible2Version}
+                    onChange={(e) => set('bible2Version', e.target.value)}
+                    placeholder="Ex: BDS, LSG, NIV..."
+                    className="bg-secondary border-border text-sm h-8" />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-[10px] text-muted-foreground">Importer le fichier JSON de la Bible secondaire</Label>
+                  <Button size="sm" variant="secondary" onClick={handleBDSImport} className="w-full gap-2">
+                    <Upload className="h-4 w-4" />
+                    Importer un fichier Bible (JSON)
+                  </Button>
+                  {bdsStatus === 'success' && (
+                    <p className="text-xs text-green-400 flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-green-400" />
+                      Bible importée avec succès — redémarrez si nécessaire
+                    </p>
+                  )}
+                  {bdsStatus === 'error' && (
+                    <p className="text-xs text-destructive flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-destructive" />
+                      Fichier invalide — format JSON biblique attendu
+                    </p>
+                  )}
+                  <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
+                    Format attendu : {`{ "Genèse": { "1": { "1": "Au commencement..." } } }`}
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-[10px] text-muted-foreground">Disposition de l'écran partagé</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { value: 'horizontal', label: 'Haut / Bas', desc: '▭ ▭' },
+                      { value: 'vertical', label: 'Gauche / Droite', desc: '▯▯' },
+                    ] as const).map(opt => (
+                      <button key={opt.value}
+                        onClick={() => set('splitLayout', opt.value)}
+                        className={cn(
+                          'py-3 px-3 rounded-lg border text-xs transition-all flex flex-col items-center gap-1',
+                          settings.splitLayout === opt.value
+                            ? 'border-primary/50 bg-primary/10 text-foreground font-medium'
+                            : 'border-border/40 bg-secondary/40 text-muted-foreground hover:bg-secondary/80'
+                        )}>
+                        <span className="text-base">{opt.desc}</span>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+
           {/* ── Onglet Présentation ── */}
           <TabsContent value="presentation" className="overflow-y-auto px-6 py-4 space-y-5">
+            {/* Avance automatique */}
             <div className="space-y-2">
               <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
                 <Timer className="h-3.5 w-3.5" /> Avance automatique
@@ -368,24 +493,44 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
               )}
             </div>
 
+            {/* Gestes tactiles */}
             <div className="space-y-2">
               <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <Sparkles className="h-3.5 w-3.5" /> Raccourcis rapides
+                <Sparkles className="h-3.5 w-3.5" /> Gestes tactiles — Écran Display (TV)
               </Label>
-              <div className="bg-secondary/40 rounded-xl p-4 space-y-2 text-xs text-muted-foreground">
+              <div className="bg-secondary/40 rounded-xl p-4 space-y-3 text-xs text-muted-foreground">
                 {[
-                  ['Entrée', 'Projeter l\'aperçu actuel'],
-                  ['→ / ↓', 'Suivant (timeline)'],
-                  ['← / ↑', 'Précédent (timeline)'],
-                  ['Échap', 'Effacer l\'écran'],
-                  ['Double-clic', 'Projeter un verset directement'],
-                  ['?', 'Afficher/masquer l\'aide'],
-                ].map(([key, desc]) => (
-                  <div key={key} className="flex items-center gap-3">
-                    <kbd className="px-2 py-0.5 rounded border border-border font-mono bg-background text-foreground text-[10px] min-w-[60px] text-center">{key}</kbd>
-                    <span>{desc}</span>
+                  { icon: '👆', gesture: 'Double-tap verset', action: 'Projeter directement sur TV' },
+                  { icon: '👈', gesture: 'Glisser ← (Display)', action: 'Verset / slide suivant(e)' },
+                  { icon: '👉', gesture: 'Glisser → (Display)', action: 'Verset / slide précédent(e)' },
+                  { icon: '☑️', gesture: 'Sélection multiple', action: 'Sélectionner plusieurs versets' },
+                  { icon: '🎞️', gesture: 'Bouton ▶ (timeline)', action: 'Lancer l\'avance automatique' },
+                ].map(({ icon, gesture, action }) => (
+                  <div key={gesture} className="flex items-start gap-3">
+                    <span className="text-base shrink-0 mt-0.5">{icon}</span>
+                    <div>
+                      <p className="font-medium text-foreground text-[11px]">{gesture}</p>
+                      <p className="opacity-70 text-[10px]">{action}</p>
+                    </div>
                   </div>
                 ))}
+              </div>
+            </div>
+
+            {/* Comportement tablette */}
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Monitor className="h-3.5 w-3.5" /> Comportement tablette
+              </Label>
+              <div className="bg-secondary/40 rounded-xl p-4 space-y-3">
+                <Toggle
+                  checked={settings.keepScreenOn ?? false}
+                  onChange={v => set('keepScreenOn', v)}
+                  label="Garder l'écran allumé pendant la présentation"
+                />
+                <p className="text-[10px] text-muted-foreground/60 pl-0.5 leading-relaxed">
+                  Empêche la tablette de se mettre en veille automatiquement pendant le culte.
+                </p>
               </div>
             </div>
           </TabsContent>

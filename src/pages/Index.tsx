@@ -1,10 +1,10 @@
 /* Page principale — Mode Présentateur */
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Monitor, BookOpen, Image, Layout, Settings, Keyboard, MonitorOff } from 'lucide-react';
+import { Monitor, BookOpen, Image, Layout, Settings, MonitorOff } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import BibleSearch from '@/components/BibleSearch';
+import BibleSearch, { type BibleNavState } from '@/components/BibleSearch';
 import PreviewPanel from '@/components/PreviewPanel';
 import QueuePanel from '@/components/QueuePanel';
 import GalleryPanel from '@/components/GalleryPanel';
@@ -15,9 +15,8 @@ import SplashScreen from '@/components/SplashScreen';
 import { useBroadcastSender, useControlReceiver, getLastTheme } from '@/hooks/useBroadcastChannel';
 import { usePeerHost } from '@/hooks/usePeerSync';
 import { useLocalServer } from '@/hooks/useLocalServer';
-import { useCastSender } from '@/hooks/useCastSender';
-import { loadBible } from '@/lib/bible';
-import { cn } from '@/lib/utils';
+import { loadBible, loadBDS } from '@/lib/bible';
+import { cn, genId } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import type { BibleData, VerseReference, CustomSlide, QueueItem, DisplayTheme, DisplayMessage } from '@/types/bible';
 
@@ -58,12 +57,18 @@ function ColResizeHandle() {
   );
 }
 
+const INITIAL_NAV: BibleNavState = { view: 'books', selectedBook: null, selectedChapter: null, searchQuery: '', alphaFilter: null };
+
 export default function Index() {
   const [bible, setBible] = useState<BibleData | null>(null);
+  const [bible2, setBible2] = useState<BibleData | null>(null);
   const [bibleLoading, setBibleLoading] = useState(true);
+  const [bibleNavState, setBibleNavState] = useState<BibleNavState>(INITIAL_NAV);
   const [selectedVerse, setSelectedVerse] = useState<VerseReference | null>(null);
+  const [selectedVerse2, setSelectedVerse2] = useState<VerseReference | null>(null);
   const [selectedSlide, setSelectedSlide] = useState<CustomSlide | null>(null);
   const [projectedVerse, setProjectedVerse] = useState<VerseReference | null>(null);
+  const [projectedSlide, setProjectedSlide] = useState<CustomSlide | null>(null);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [history, setHistory] = useState<QueueItem[]>([]);
   const [slides, setSlides] = useState<CustomSlide[]>(() => {
@@ -71,7 +76,6 @@ export default function Index() {
     catch { return []; }
   });
   const [showSettings, setShowSettings] = useState(false);
-  const [showShortcuts, setShowShortcuts] = useState(false);
   const [currentTimelineId, setCurrentTimelineId] = useState<string | null>(null);
   const [settings, setSettings] = useState<ChurchSettings>(loadSettings);
   const [theme, setTheme] = useState<DisplayTheme>(() => {
@@ -94,8 +98,7 @@ export default function Index() {
     else if (msg.type === 'request-prev') timelinePrevRef.current();
   }, []));
   const localServer = useLocalServer();
-  const castSender = useCastSender();
-  const send = useBroadcastSender(peer.peerSend, localServer.sendToWs, castSender.castSend);
+  const send = useBroadcastSender(peer.peerSend, localServer.sendToWs);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -112,20 +115,43 @@ export default function Index() {
   }, []);
 
   useEffect(() => {
-    send({ type: 'theme-change', theme });
-  }, [theme, send]);
+    loadBDS().then(data => {
+      if (Object.keys(data).length > 0) setBible2(data);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    send({ type: 'theme-change', theme: { ...theme, churchLogo: settings.churchLogo || undefined } });
+  }, [theme, settings.churchLogo, send]);
 
   useEffect(() => {
     localStorage.setItem('biblecast:slides', JSON.stringify(slides));
   }, [slides]);
 
-  /* Polling des paramètres (pour autoAdvance et autres) */
   useEffect(() => {
     const interval = setInterval(() => setSettings(loadSettings()), 2000);
     return () => clearInterval(interval);
   }, []);
 
-  /* Auto-veille */
+  useEffect(() => {
+    if (!settings.keepScreenOn) return;
+    let wakeLock: WakeLockSentinel | null = null;
+    const acquire = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await (navigator as any).wakeLock.request('screen');
+        }
+      } catch { }
+    };
+    acquire();
+    const onVisChange = () => { if (document.visibilityState === 'visible') acquire(); };
+    document.addEventListener('visibilitychange', onVisChange);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisChange);
+      wakeLock?.release().catch(() => {});
+    };
+  }, [settings.keepScreenOn]);
+
   useEffect(() => {
     if (!settings.autoSleep) return;
     const check = setInterval(() => {
@@ -143,53 +169,78 @@ export default function Index() {
     setSelectedSlide(null);
   }, []);
 
+  const handleSelectVerse2 = useCallback((verse: VerseReference | null) => {
+    setSelectedVerse2(verse);
+  }, []);
+
   const handleSelectSlide = useCallback((slide: CustomSlide) => {
     setSelectedSlide(slide);
     setSelectedVerse(null);
   }, []);
 
-  /* Projection immédiate (double-clic / raccourci) */
   const handleProjectVerse = useCallback((verse: VerseReference) => {
-    send({ type: 'show-verse', verse });
+    if (selectedVerse2) {
+      send({ type: 'show-dual-verse', verse, verse2: selectedVerse2 });
+    } else {
+      send({ type: 'show-verse', verse });
+    }
     setSelectedVerse(verse);
     setSelectedSlide(null);
     setProjectedVerse(verse);
-    const item: QueueItem = { id: crypto.randomUUID(), type: 'verse', verse };
+    setProjectedSlide(null);
+    const item: QueueItem = { id: genId(), type: 'verse', verse };
     setHistory(prev => [item, ...prev]);
     toast({
       title: `${verse.book} ${verse.chapter}:${verse.verse}`,
       description: 'Projeté sur l\'écran',
       duration: 1800,
     });
-  }, [send, toast]);
+  }, [send, toast, selectedVerse2]);
+
+  const handleProjectSlide = useCallback((slide: CustomSlide) => {
+    send({ type: 'show-slide', slide });
+    setSelectedSlide(slide);
+    setSelectedVerse(null);
+    setProjectedSlide(slide);
+    setProjectedVerse(null);
+    lastProjectionTimeRef.current = Date.now();
+    const item: QueueItem = { id: genId(), type: 'slide', slide };
+    setHistory(prev => [item, ...prev]);
+  }, [send]);
 
   const handleSendToDisplay = useCallback(() => {
     if (selectedVerse) {
-      send({ type: 'show-verse', verse: selectedVerse });
+      if (selectedVerse2) {
+        send({ type: 'show-dual-verse', verse: selectedVerse, verse2: selectedVerse2 });
+      } else {
+        send({ type: 'show-verse', verse: selectedVerse });
+      }
       setProjectedVerse(selectedVerse);
+      setProjectedSlide(null);
       lastProjectionTimeRef.current = Date.now();
-      const item: QueueItem = { id: crypto.randomUUID(), type: 'verse', verse: selectedVerse };
+      const item: QueueItem = { id: genId(), type: 'verse', verse: selectedVerse };
       setHistory(prev => [item, ...prev]);
     } else if (selectedSlide) {
       send({ type: 'show-slide', slide: selectedSlide });
       setProjectedVerse(null);
+      setProjectedSlide(selectedSlide);
       lastProjectionTimeRef.current = Date.now();
-      const item: QueueItem = { id: crypto.randomUUID(), type: 'slide', slide: selectedSlide };
+      const item: QueueItem = { id: genId(), type: 'slide', slide: selectedSlide };
       setHistory(prev => [item, ...prev]);
     }
-  }, [selectedVerse, selectedSlide, send]);
+  }, [selectedVerse, selectedVerse2, selectedSlide, send]);
 
   const handleAddToQueue = useCallback(() => {
     if (selectedVerse) {
-      setQueue(prev => [...prev, { id: crypto.randomUUID(), type: 'verse', verse: selectedVerse }]);
+      setQueue(prev => [...prev, { id: genId(), type: 'verse', verse: selectedVerse }]);
     } else if (selectedSlide) {
-      setQueue(prev => [...prev, { id: crypto.randomUUID(), type: 'slide', slide: selectedSlide }]);
+      setQueue(prev => [...prev, { id: genId(), type: 'slide', slide: selectedSlide }]);
     }
   }, [selectedVerse, selectedSlide]);
 
   const handleAddMultipleVerses = useCallback((verses: VerseReference[]) => {
     const items: QueueItem[] = verses.map(v => ({
-      id: crypto.randomUUID(),
+      id: genId(),
       type: 'verse' as const,
       verse: v,
     }));
@@ -206,11 +257,13 @@ export default function Index() {
       setSelectedVerse(item.verse);
       setSelectedSlide(null);
       setProjectedVerse(item.verse);
+      setProjectedSlide(null);
     } else if (item.type === 'slide' && item.slide) {
       send({ type: 'show-slide', slide: item.slide });
       setSelectedSlide(item.slide);
       setSelectedVerse(null);
       setProjectedVerse(null);
+      setProjectedSlide(item.slide);
     }
     lastProjectionTimeRef.current = Date.now();
     setCurrentTimelineId(item.id);
@@ -235,17 +288,14 @@ export default function Index() {
     if (idx > 0) handleTimelineSendItem(nonSection[idx - 1]);
   }, [queue, currentTimelineId, handleTimelineSendItem]);
 
-  /* Sync refs pour usePeerHost callback (évite dépendances circulaires) */
   useEffect(() => { timelineNextRef.current = handleTimelineNext; }, [handleTimelineNext]);
   useEffect(() => { timelinePrevRef.current = handleTimelinePrev; }, [handleTimelinePrev]);
 
-  /* Récepteur canal de contrôle (swipe sur Display même device) */
   useControlReceiver(useCallback((msg: DisplayMessage) => {
     if (msg.type === 'request-next') handleTimelineNext();
     else if (msg.type === 'request-prev') handleTimelinePrev();
   }, [handleTimelineNext, handleTimelinePrev]));
 
-  /* Auto-advance de la timeline */
   useEffect(() => {
     if (autoAdvanceRef.current) clearInterval(autoAdvanceRef.current);
     if (settings.autoAdvance && currentTimelineId) {
@@ -295,13 +345,13 @@ export default function Index() {
     send({ type: 'show-slide', slide });
     setSelectedSlide(slide);
     setSelectedVerse(null);
-    const item: QueueItem = { id: crypto.randomUUID(), type: 'slide', slide };
+    const item: QueueItem = { id: genId(), type: 'slide', slide };
     setHistory(prev => [item, ...prev]);
   }, [send]);
 
   const handleAddSection = useCallback((name: string, color: string) => {
     setQueue(prev => [...prev, {
-      id: crypto.randomUUID(),
+      id: genId(),
       type: 'section',
       sectionName: name,
       sectionColor: color,
@@ -332,7 +382,12 @@ export default function Index() {
     setTheme(t => ({ ...t, showChurchLogo: show }));
   }, []);
 
-  /* Raccourcis clavier globaux */
+  const handleBible2Imported = useCallback(() => {
+    loadBDS().then(data => {
+      if (Object.keys(data).length > 0) setBible2(data);
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -358,9 +413,6 @@ export default function Index() {
           e.preventDefault();
           handleClearDisplay();
           break;
-        case '?':
-          setShowShortcuts(v => !v);
-          break;
       }
     };
 
@@ -373,7 +425,6 @@ export default function Index() {
       <SplashScreen loading={bibleLoading} />
 
       <div className="h-screen flex flex-col overflow-hidden">
-        {/* Barre supérieure */}
         <header className="h-14 flex items-center px-4 border-b border-border shrink-0 glass-panel">
           <div className="flex items-center gap-2.5">
             <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center">
@@ -389,18 +440,7 @@ export default function Index() {
               connectedCount={peer.connectedCount}
               isReady={peer.isReady}
               localServer={localServer}
-              castState={castSender.castState}
-              onRequestCast={castSender.requestCast}
-              onEndCast={castSender.endCast}
             />
-            <Button
-              size="sm" variant="ghost"
-              className="gap-1.5 text-muted-foreground hover:text-foreground transition-smooth"
-              onClick={() => setShowShortcuts(v => !v)}
-              title="Raccourcis clavier (?)"
-            >
-              <Keyboard className="h-4 w-4" />
-            </Button>
             <Button
               size="sm" variant="ghost"
               className="gap-1.5 text-muted-foreground hover:text-destructive/80 transition-smooth"
@@ -427,29 +467,8 @@ export default function Index() {
           </div>
         </header>
 
-        {/* Panneau raccourcis */}
-        {showShortcuts && (
-          <div className="border-b border-border bg-secondary/40 px-6 py-2.5 flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground shrink-0">
-            {[
-              ['Entrée', 'Projeter l\'aperçu'],
-              ['→ / ↓', 'Suivant (timeline)'],
-              ['← / ↑', 'Précédent (timeline)'],
-              ['Échap', 'Effacer l\'écran'],
-              ['Double-clic', 'Projeter un verset'],
-              ['?', 'Afficher/masquer ce panneau'],
-            ].map(([key, desc]) => (
-              <span key={key}>
-                <kbd className="px-1.5 py-0.5 rounded bg-secondary border border-border text-foreground font-mono text-[10px]">{key}</kbd>
-                <span className="ml-1.5">{desc}</span>
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Contenu principal — panneaux redimensionnables */}
         <PanelGroup direction="horizontal" className="flex-1 overflow-hidden">
 
-          {/* Panneau gauche — Bible / Slides / Galerie */}
           <Panel
             defaultSize={23}
             minSize={14}
@@ -469,26 +488,32 @@ export default function Index() {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="bible" className="flex-1 mt-0 overflow-hidden">
+              <TabsContent value="bible" forceMount className="flex-1 mt-0 overflow-hidden data-[state=inactive]:hidden">
                 <BibleSearch
                   bible={bible}
+                  bible2={bible2}
+                  bible2Name="BDS"
+                  navState={bibleNavState}
+                  onNavStateChange={setBibleNavState}
                   onSelectVerse={handleSelectVerse}
+                  onSelectVerse2={handleSelectVerse2}
                   onProjectVerse={handleProjectVerse}
                   onAddMultipleVerses={handleAddMultipleVerses}
                   currentProjectedVerse={projectedVerse}
                 />
               </TabsContent>
 
-              <TabsContent value="slides" className="flex-1 mt-0 overflow-hidden">
+              <TabsContent value="slides" forceMount className="flex-1 mt-0 overflow-hidden data-[state=inactive]:hidden">
                 <SlidesEditor
                   slides={slides}
-                  onSlidesChange={setSlides}
-                  onSelectSlide={handleSelectSlide}
-                  onSendSlide={handleSendSlide}
+                  onChange={setSlides}
+                  onProjectSlide={handleProjectSlide}
+                  currentProjectedSlide={projectedSlide}
+                  onEditingSlide={handleSelectSlide}
                 />
               </TabsContent>
 
-              <TabsContent value="gallery" className="flex-1 mt-0 overflow-hidden">
+              <TabsContent value="gallery" forceMount className="flex-1 mt-0 overflow-hidden data-[state=inactive]:hidden">
                 <GalleryPanel
                   selectedSlide={selectedSlide}
                   theme={theme}
@@ -503,7 +528,6 @@ export default function Index() {
 
           <ColResizeHandle />
 
-          {/* Panneau central — Prévisualisation */}
           <Panel defaultSize={54} minSize={25} className="flex flex-col overflow-hidden">
             <PreviewPanel
               selectedVerse={selectedVerse}
@@ -513,12 +537,12 @@ export default function Index() {
               onClearDisplay={handleClearDisplay}
               theme={theme}
               onThemeChange={setTheme}
+              churchLogo={settings.churchLogo}
             />
           </Panel>
 
           <ColResizeHandle />
 
-          {/* Panneau droit — Timeline + Historique */}
           <Panel
             defaultSize={23}
             minSize={14}
@@ -543,7 +567,12 @@ export default function Index() {
 
         </PanelGroup>
 
-        {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+        {showSettings && (
+          <SettingsPanel
+            onClose={() => setShowSettings(false)}
+            onBible2Imported={handleBible2Imported}
+          />
+        )}
       </div>
     </>
   );

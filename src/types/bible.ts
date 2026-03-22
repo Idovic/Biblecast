@@ -1,5 +1,3 @@
-/* Types pour BibleCast */
-
 export interface BibleData {
   [bookName: string]: {
     [chapter: string]: {
@@ -15,7 +13,7 @@ export interface VerseReference {
   text: string;
 }
 
-export type SlideType = 'text-title' | 'title-only' | 'verse-title' | 'blank' | 'bullet-list';
+export type SlideType = 'text-title' | 'title-only' | 'verse-title' | 'blank' | 'bullet-list' | 'image-full';
 
 export interface CustomSlide {
   id: string;
@@ -29,6 +27,9 @@ export interface CustomSlide {
   backgroundImage?: string;
   textShadow?: boolean;
   showLogo?: boolean;
+  fontSize?: 'small' | 'medium' | 'large' | 'xlarge';
+  titleFontSize?: 'small' | 'medium' | 'large' | 'xlarge';
+  textAlign?: 'left' | 'center' | 'right';
 }
 
 export interface QueueItem {
@@ -41,10 +42,12 @@ export interface QueueItem {
 }
 
 export interface DisplayMessage {
-  type: 'show-verse' | 'show-slide' | 'clear' | 'theme-change' | 'request-next' | 'request-prev';
+  type: 'show-verse' | 'show-slide' | 'clear' | 'theme-change' | 'request-next' | 'request-prev' | 'show-dual-verse' | 'queue-update';
   verse?: VerseReference;
+  verse2?: VerseReference;
   slide?: CustomSlide;
   theme?: DisplayTheme;
+  queueCount?: number;
 }
 
 export interface DisplayTheme {
@@ -55,6 +58,8 @@ export interface DisplayTheme {
   bgOpacity: number;
   verseBackgroundImage?: string;
   showChurchLogo?: boolean;
+  splitLayout?: 'horizontal' | 'vertical';
+  churchLogo?: string;
 }
 
 export interface SearchResult {

@@ -59,15 +59,10 @@ export function usePeerHost(onGuestMessage?: (msg: DisplayMessage) => void): Pee
   const [roomCode] = useState<string>(getOrCreateRoomCode);
   const [connectedCount, setConnectedCount] = useState(0);
   const [isReady, setIsReady] = useState(false);
-  const [localIP, setLocalIP] = useState<string>(window.location.hostname);
   const peerRef = useRef<Peer | null>(null);
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
   const onGuestMessageRef = useRef(onGuestMessage);
   onGuestMessageRef.current = onGuestMessage;
-
-  useEffect(() => {
-    detectLocalIP().then(ip => setLocalIP(ip));
-  }, []);
 
   const peerSend = useCallback((msg: DisplayMessage) => {
     connectionsRef.current.forEach((conn) => {
@@ -145,8 +140,8 @@ export function usePeerHost(onGuestMessage?: (msg: DisplayMessage) => void): Pee
     };
   }, [roomCode]);
 
-  const port = window.location.port ? `:${window.location.port}` : '';
-  const displayUrl = `http://${localIP}${port}/display?room=${roomCode}`;
+  const basePath = (import.meta.env.BASE_URL as string) ?? '/';
+  const displayUrl = `${window.location.origin}${basePath}display?room=${roomCode}`;
 
   return { roomCode, displayUrl, connectedCount, isReady, peerSend };
 }

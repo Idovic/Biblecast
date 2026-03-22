@@ -2,8 +2,10 @@
 import type { BibleData, VerseReference, SearchResult } from '@/types/bible';
 
 let bibleCache: BibleData | null = null;
+let bdsCache: BibleData | null = null;
 
-// Charger la Bible depuis le fichier JSON
+const BDS_STORAGE_KEY = 'biblecast:bds-data';
+
 export async function loadBible(): Promise<BibleData> {
   if (bibleCache) return bibleCache;
   const response = await fetch(import.meta.env.BASE_URL + 'bible-fr.json');
@@ -11,7 +13,40 @@ export async function loadBible(): Promise<BibleData> {
   return bibleCache!;
 }
 
-// Liste des 66 livres de la Bible (ordre canonique)
+export async function loadBDS(): Promise<BibleData> {
+  if (bdsCache !== null) return bdsCache;
+  try {
+    const stored = localStorage.getItem(BDS_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as BibleData;
+      if (Object.keys(parsed).length > 0) {
+        bdsCache = parsed;
+        return bdsCache;
+      }
+    }
+  } catch { }
+  try {
+    const response = await fetch(import.meta.env.BASE_URL + 'bible-bds.json');
+    const data = await response.json() as BibleData;
+    bdsCache = data;
+    return bdsCache;
+  } catch {
+    bdsCache = {};
+    return {};
+  }
+}
+
+export function importBDS(data: BibleData): void {
+  try {
+    localStorage.setItem(BDS_STORAGE_KEY, JSON.stringify(data));
+    bdsCache = data;
+  } catch { }
+}
+
+export function clearBDSCache(): void {
+  bdsCache = null;
+}
+
 export const BIBLE_BOOKS = [
   'Genèse', 'Exode', 'Lévitique', 'Nombres', 'Deutéronome',
   'Josué', 'Juges', 'Ruth', '1 Samuel', '2 Samuel',
@@ -29,42 +64,35 @@ export const BIBLE_BOOKS = [
   'Jude', 'Apocalypse',
 ];
 
-// Obtenir les chapitres d'un livre
 export function getChapters(bible: BibleData, book: string): number[] {
   const bookData = bible[book];
   if (!bookData) return [];
   return Object.keys(bookData).map(Number).sort((a, b) => a - b);
 }
 
-// Obtenir les versets d'un chapitre
 export function getVerses(bible: BibleData, book: string, chapter: number): number[] {
   const chapterData = bible[book]?.[String(chapter)];
   if (!chapterData) return [];
   return Object.keys(chapterData).map(Number).sort((a, b) => a - b);
 }
 
-// Obtenir le texte d'un verset
 export function getVerseText(bible: BibleData, book: string, chapter: number, verse: number): string {
   return bible[book]?.[String(chapter)]?.[String(verse)] || '';
 }
 
-// Obtenir une référence complète
 export function getVerse(bible: BibleData, book: string, chapter: number, verse: number): VerseReference | null {
   const text = getVerseText(bible, book, chapter, verse);
   if (!text) return null;
   return { book, chapter, verse, text };
 }
 
-// Formater la référence (ex: "Jean 3:16")
 export function formatReference(ref: VerseReference): string {
   return `${ref.book} ${ref.chapter}:${ref.verse}`;
 }
 
-// Recherche par mot-clé ou référence directe (ex: "Jean 3:16"), limité à 50 résultats
 export function searchBible(bible: BibleData, query: string, limit = 50): SearchResult[] {
   if (!query || query.length < 2) return [];
 
-  // Détection de référence directe : "Livre chapitre:verset"
   const refMatch = query.trim().match(/^(.+?)\s+(\d+):(\d+)\s*$/i);
   if (refMatch) {
     const bookQuery = refMatch[1].trim().toLowerCase();
@@ -89,13 +117,7 @@ export function searchBible(bible: BibleData, query: string, limit = 50): Search
       for (const verse of Object.keys(bible[book][chapter])) {
         const text = bible[book][chapter][verse];
         if (text.toLowerCase().includes(lowerQuery)) {
-          results.push({
-            book,
-            chapter: Number(chapter),
-            verse: Number(verse),
-            text,
-            highlight: text,
-          });
+          results.push({ book, chapter: Number(chapter), verse: Number(verse), text, highlight: text });
           if (results.length >= limit) return results;
         }
       }

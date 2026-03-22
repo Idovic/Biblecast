@@ -1,511 +1,872 @@
-/* Éditeur de slides personnalisées */
+/* Éditeur de diapositives — genId() compatible Android + templates prédéfinis */
 import { useState, useRef } from 'react';
 import {
-  Plus, Trash2, Upload, Send, Copy, Tag,
-  AlignCenter, Type, BookOpen, Square, List, ChevronDown, Sparkles, Palette, Image
+  Plus, Trash2, ChevronUp, ChevronDown, Edit3, Image as ImageIcon,
+  Download, Upload, AlignLeft, AlignCenter, AlignRight, Maximize2, X,
+  LayoutTemplate, CheckCircle2, Send, Copy,
+  HandHeart, Megaphone, BookOpen, Music2, Mic2, Users, Gift,
+  FileText, List, Frame, Presentation, Church, Sparkles,
 } from 'lucide-react';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger
-} from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
+import { cn, genId } from '@/lib/utils';
 import type { CustomSlide, SlideType } from '@/types/bible';
-import { loadSettings } from '@/components/SettingsPanel';
-
-function ColResizeHandle() {
-  const [dragging, setDragging] = useState(false);
-  return (
-    <PanelResizeHandle
-      onDragging={setDragging}
-      className={cn(
-        'group relative flex-shrink-0 flex items-center justify-center cursor-col-resize transition-colors z-10 w-[6px]',
-        dragging ? 'bg-primary/10' : 'bg-transparent hover:bg-primary/[0.07]'
-      )}
-    >
-      <div className={cn('absolute inset-y-0 left-1/2 -translate-x-1/2 w-px transition-all duration-150',
-        dragging ? 'bg-primary/70' : 'bg-border group-hover:bg-primary/50')} />
-      <div className={cn('relative z-10 flex flex-col gap-[3px] transition-opacity duration-150',
-        dragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}>
-        {[0, 1, 2, 3, 4].map(i => (
-          <span key={i} className={cn('block w-1 h-1 rounded-full',
-            dragging ? 'bg-primary' : 'bg-primary/60')} />
-        ))}
-      </div>
-    </PanelResizeHandle>
-  );
-}
 
 interface SlidesEditorProps {
   slides: CustomSlide[];
-  onSlidesChange: (slides: CustomSlide[]) => void;
-  onSelectSlide: (slide: CustomSlide) => void;
-  onSendSlide: (slide: CustomSlide) => void;
+  onChange: (slides: CustomSlide[]) => void;
+  onProjectSlide?: (slide: CustomSlide) => void;
+  currentProjectedSlide?: CustomSlide | null;
+  onEditingSlide?: (slide: CustomSlide | null) => void;
 }
 
-const SOLID_COLORS = [
-  '#000000', '#0a0a12', '#1a1a2e', '#0a1628', '#1a1a3e',
-  '#2a0a14', '#3d0a0a', '#0a1f0f', '#0f2027', '#1a0a3e',
-  '#2d1b69', '#0f3460', '#1b4332', '#7b2d00', '#3d2b1f',
-  '#1c1c1c', '#2c3e50', '#17252a', '#1a1a1a', '#0d1117',
-];
-
-const TEXT_COLORS = [
-  '#ffffff', '#f8f8f8', '#f4a261', '#ffd700', '#a8e6cf',
-  '#89cff0', '#ffb3ba', '#ffe4b5', '#e0e0e0', '#c0c0c0',
-];
-
-const GRADIENT_PRESETS = [
-  { label: 'Nuit profonde', value: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)' },
-  { label: 'Océan', value: 'linear-gradient(135deg, #0a1628 0%, #1a3a6e 50%, #0f3460 100%)' },
-  { label: 'Aurore', value: 'linear-gradient(135deg, #0f0c29 0%, #302b63 60%, #e96c4c 100%)' },
-  { label: 'Forêt', value: 'linear-gradient(135deg, #0a1f0f 0%, #1b5e20 80%, #2e7d32 100%)' },
-  { label: 'Bordeaux', value: 'linear-gradient(135deg, #1a0505 0%, #4a0a14 50%, #7b1a28 100%)' },
-  { label: 'Ardoise', value: 'linear-gradient(135deg, #1c1c1c 0%, #2c3e50 50%, #3d566e 100%)' },
-  { label: 'Améthyste', value: 'linear-gradient(135deg, #1a0a3e 0%, #4a1a8e 50%, #7b2fbe 100%)' },
-  { label: 'Or et nuit', value: 'linear-gradient(135deg, #1a1400 0%, #3d3200 50%, #a08000 100%)' },
-  { label: 'Crépuscule', value: 'linear-gradient(135deg, #0d1117 0%, #161b22 40%, #21262d 100%)' },
-  { label: 'Lune', value: 'linear-gradient(180deg, #0a0a18 0%, #1a1a3e 50%, #2a2a5e 100%)' },
-  { label: 'Feu doux', value: 'linear-gradient(135deg, #1a0505 0%, #3d1200 50%, #7b2800 100%)' },
-  { label: 'Aube', value: 'linear-gradient(180deg, #0f0c29 0%, #2d1b69 40%, #e96c4c 100%)' },
-];
-
-const SLIDE_TYPES: { type: SlideType; label: string; icon: React.ReactNode; desc: string }[] = [
-  { type: 'text-title', label: 'Texte + Titre', icon: <Type className="h-3.5 w-3.5" />, desc: 'Titre et texte libre' },
-  { type: 'title-only', label: 'Titre seul', icon: <AlignCenter className="h-3.5 w-3.5" />, desc: 'Grand titre centré' },
-  { type: 'verse-title', label: 'Verset + Titre', icon: <BookOpen className="h-3.5 w-3.5" />, desc: 'Titre + texte biblique' },
-  { type: 'blank', label: 'Vide', icon: <Square className="h-3.5 w-3.5" />, desc: 'Fond seul, sans texte' },
-  { type: 'bullet-list', label: 'Liste à puces', icon: <List className="h-3.5 w-3.5" />, desc: 'Points numérotés' },
-];
-
-const TYPE_COLORS: Record<SlideType, string> = {
-  'text-title': 'bg-blue-500/20 text-blue-400',
-  'title-only': 'bg-purple-500/20 text-purple-400',
-  'verse-title': 'bg-primary/20 text-primary',
-  'blank': 'bg-gray-500/20 text-gray-400',
-  'bullet-list': 'bg-green-500/20 text-green-400',
+const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
+  'text-title': 'Titre + Texte',
+  'title-only': 'Titre seul',
+  'verse-title': 'Verset + Titre',
+  'blank': 'Vide',
+  'bullet-list': 'Liste à puces',
+  'image-full': 'Visuel (Image)',
 };
 
-const TYPE_LABELS: Record<SlideType, string> = {
-  'text-title': 'Texte', 'title-only': 'Titre',
-  'verse-title': 'Verset', 'blank': 'Vide', 'bullet-list': 'Liste',
+const SLIDE_TYPE_ICON_COMPONENTS: Record<SlideType, React.ReactNode> = {
+  'text-title': <FileText className="h-3 w-3" />,
+  'title-only': <Presentation className="h-3 w-3" />,
+  'verse-title': <BookOpen className="h-3 w-3" />,
+  'blank': <Frame className="h-3 w-3" />,
+  'bullet-list': <List className="h-3 w-3" />,
+  'image-full': <ImageIcon className="h-3 w-3" />,
 };
 
-const TEMPLATES: { category: string; items: Partial<CustomSlide>[] }[] = [
-  {
-    category: 'Culte',
-    items: [
-      { title: 'Bienvenue !', content: 'Nous sommes heureux de vous accueillir.', slideType: 'text-title', backgroundGradient: 'linear-gradient(135deg, #1a1a2e 0%, #302b63 100%)' },
-      { title: 'Temps de louange', content: '', slideType: 'title-only', backgroundGradient: 'linear-gradient(135deg, #0f0c29 0%, #302b63 100%)' },
-      { title: 'Prédication', content: '', slideType: 'title-only', backgroundGradient: 'linear-gradient(135deg, #0a1628 0%, #1a3a6e 100%)' },
-      { title: 'Temps de prière', content: '', slideType: 'title-only', backgroundGradient: 'linear-gradient(135deg, #1a0505 0%, #4a0a14 100%)' },
-      { title: 'Offrande', content: 'Donnez selon les dispositions de votre cœur.', slideType: 'text-title', backgroundGradient: 'linear-gradient(135deg, #0a1f0f 0%, #1b5e20 100%)' },
-      { title: 'Merci d\'être venu !', content: 'Que Dieu vous bénisse.', slideType: 'text-title', backgroundGradient: 'linear-gradient(135deg, #1a1400 0%, #3d3200 100%)' },
-    ],
-  },
-  {
-    category: 'Annonces',
-    items: [
-      { title: 'Annonces', bullets: ['Annonce 1', 'Annonce 2', 'Annonce 3'], slideType: 'bullet-list', backgroundGradient: 'linear-gradient(135deg, #1a0a3e 0%, #4a1a8e 100%)' },
-      { title: 'Événement à venir', content: 'Date · Lieu · Horaire', slideType: 'text-title', backgroundColor: '#1a1a3e' },
-      { title: 'Groupe de cellule', content: 'Rejoignez-nous cette semaine !', slideType: 'text-title', backgroundColor: '#1a1a3e' },
-    ],
-  },
+const FONT_SIZE_OPTIONS = [
+  { value: 'small', label: 'Petit', desc: 'S' },
+  { value: 'medium', label: 'Moyen', desc: 'M' },
+  { value: 'large', label: 'Grand', desc: 'L' },
+  { value: 'xlarge', label: 'Très grand', desc: 'XL' },
+] as const;
+
+export const GRADIENT_PRESETS = [
+  { label: 'Nuit', value: 'linear-gradient(135deg,#0f0c29,#302b63,#24243e)' },
+  { label: 'Violet', value: 'linear-gradient(135deg,#2d1b69,#11998e)' },
+  { label: 'Bleu', value: 'linear-gradient(135deg,#1a1a2e,#16213e,#0f3460)' },
+  { label: 'Bordeaux', value: 'linear-gradient(135deg,#360033,#0b8793)' },
+  { label: 'Forêt', value: 'linear-gradient(135deg,#134e5e,#71b280)' },
+  { label: 'Aube', value: 'linear-gradient(135deg,#373b44,#4286f4)' },
+  { label: 'Or', value: 'linear-gradient(135deg,#c79231,#3b2a00)' },
+  { label: 'Ébène', value: 'linear-gradient(135deg,#232526,#414345)' },
+  { label: 'Grenat', value: 'linear-gradient(135deg,#4b0010,#1f003a)' },
 ];
 
-function getSlideBackground(slide: CustomSlide): React.CSSProperties {
-  if (slide.backgroundImage) return { backgroundImage: `url(${slide.backgroundImage})`, backgroundSize: 'cover', backgroundPosition: 'center' };
-  if (slide.backgroundGradient) return { background: slide.backgroundGradient };
-  if (slide.backgroundColor) return { backgroundColor: slide.backgroundColor };
-  return { backgroundColor: '#1a1a2e' };
+const TEXT_COLORS = ['#ffffff', '#f5f5dc', '#ffd700', '#87ceeb', '#98fb98', '#ffa07a', '#e0b0ff'];
+
+interface SlideTemplate {
+  id: string;
+  name: string;
+  Icon: React.ComponentType<{ className?: string }>;
+  iconColor: string;
+  description: string;
+  slide: Omit<CustomSlide, 'id'>;
 }
 
-export default function SlidesEditor({ slides, onSlidesChange, onSelectSlide, onSendSlide }: SlidesEditorProps) {
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const [bgTab, setBgTab] = useState<'solid' | 'gradient'>('solid');
-  const dragItemRef = useRef<string | null>(null);
+const SLIDE_TEMPLATES: SlideTemplate[] = [
+  {
+    id: 'bienvenue',
+    name: 'Bienvenue',
+    Icon: Church,
+    iconColor: '#93c5fd',
+    description: 'Accueil des fidèles',
+    slide: {
+      title: 'Bienvenue !',
+      content: '',
+      slideType: 'title-only',
+      textColor: '#ffffff',
+      backgroundGradient: 'linear-gradient(135deg,#1a1a2e,#16213e,#0f3460)',
+      fontSize: 'xlarge',
+      textAlign: 'center',
+      textShadow: true,
+      showLogo: true,
+    },
+  },
+  {
+    id: 'priere',
+    name: "Prière d'intercession",
+    Icon: HandHeart,
+    iconColor: '#f9a8d4',
+    description: 'Prière collective',
+    slide: {
+      title: "Prière d'intercession",
+      content: '« La prière fervente du juste a une grande efficace. »\n— Jacques 5:16',
+      slideType: 'text-title',
+      textColor: '#f5f5dc',
+      backgroundGradient: 'linear-gradient(135deg,#360033,#0b8793)',
+      fontSize: 'large',
+      textAlign: 'center',
+      textShadow: true,
+      showLogo: false,
+    },
+  },
+  {
+    id: 'ecole',
+    name: 'École du dimanche',
+    Icon: BookOpen,
+    iconColor: '#86efac',
+    description: 'Thème + verset',
+    slide: {
+      title: 'École du dimanche',
+      content: 'Thème : \nVerset : ',
+      slideType: 'text-title',
+      textColor: '#ffffff',
+      backgroundGradient: 'linear-gradient(135deg,#134e5e,#71b280)',
+      fontSize: 'large',
+      textAlign: 'center',
+      textShadow: false,
+      showLogo: false,
+    },
+  },
+  {
+    id: 'annonce',
+    name: 'Annonces',
+    Icon: Megaphone,
+    iconColor: '#fbbf24',
+    description: "Informations de l'assemblée",
+    slide: {
+      title: 'Annonces',
+      content: '',
+      slideType: 'text-title',
+      textColor: '#ffffff',
+      backgroundGradient: 'linear-gradient(135deg,#373b44,#4286f4)',
+      fontSize: 'large',
+      textAlign: 'center',
+      textShadow: false,
+      showLogo: false,
+    },
+  },
+  {
+    id: 'dimes',
+    name: 'Dîmes & Offrandes',
+    Icon: Gift,
+    iconColor: '#fcd34d',
+    description: 'Collecte avec verset',
+    slide: {
+      title: 'Dîmes & Offrandes',
+      content: '« Apportez à la maison du trésor toutes les dîmes… »\n— Malachie 3:10',
+      slideType: 'text-title',
+      textColor: '#ffd700',
+      backgroundGradient: 'linear-gradient(135deg,#c79231,#3b2a00)',
+      fontSize: 'large',
+      textAlign: 'center',
+      textShadow: true,
+      showLogo: false,
+    },
+  },
+  {
+    id: 'temoignages',
+    name: 'Témoignages',
+    Icon: Mic2,
+    iconColor: '#c4b5fd',
+    description: 'Partage de témoignages',
+    slide: {
+      title: 'Témoignages',
+      content: '',
+      slideType: 'title-only',
+      textColor: '#ffffff',
+      backgroundGradient: 'linear-gradient(135deg,#4b0010,#1f003a)',
+      fontSize: 'xlarge',
+      textAlign: 'center',
+      textShadow: true,
+      showLogo: false,
+    },
+  },
+  {
+    id: 'louange',
+    name: 'Louange & Adoration',
+    Icon: Music2,
+    iconColor: '#e0b0ff',
+    description: 'Temps de louange',
+    slide: {
+      title: 'Louange & Adoration',
+      content: '',
+      slideType: 'title-only',
+      textColor: '#e0b0ff',
+      backgroundGradient: 'linear-gradient(135deg,#2d1b69,#11998e)',
+      fontSize: 'xlarge',
+      textAlign: 'center',
+      textShadow: true,
+      showLogo: false,
+    },
+  },
+  {
+    id: 'chorale',
+    name: 'Prestation de la Chorale',
+    Icon: Users,
+    iconColor: '#6ee7b7',
+    description: 'Concert choral',
+    slide: {
+      title: 'Prestation de la Chorale',
+      content: '',
+      slideType: 'title-only',
+      textColor: '#98fb98',
+      backgroundGradient: 'linear-gradient(135deg,#134e5e,#71b280)',
+      fontSize: 'xlarge',
+      textAlign: 'center',
+      textShadow: true,
+      showLogo: false,
+    },
+  },
+  {
+    id: 'predication',
+    name: 'Prédication',
+    Icon: Sparkles,
+    iconColor: '#fde68a',
+    description: 'Thème + verset référence',
+    slide: {
+      title: 'Prédication',
+      content: 'Thème : \nVerset : ',
+      slideType: 'text-title',
+      textColor: '#ffffff',
+      backgroundGradient: 'linear-gradient(135deg,#0f0c29,#302b63,#24243e)',
+      fontSize: 'large',
+      textAlign: 'center',
+      textShadow: true,
+      showLogo: true,
+    },
+  },
+  {
+    id: 'verset',
+    name: 'Verset simple',
+    Icon: BookOpen,
+    iconColor: '#f5f5dc',
+    description: 'Citation biblique',
+    slide: {
+      title: 'Livre chapitre:verset',
+      content: '« Saisissez le texte du verset ici »',
+      slideType: 'verse-title',
+      textColor: '#f5f5dc',
+      backgroundGradient: 'linear-gradient(135deg,#232526,#414345)',
+      fontSize: 'large',
+      textAlign: 'center',
+      textShadow: true,
+      showLogo: false,
+    },
+  },
+  {
+    id: 'liste',
+    name: 'Liste à puces',
+    Icon: List,
+    iconColor: '#93c5fd',
+    description: 'Points clés, programme',
+    slide: {
+      title: 'Programme du culte',
+      content: '',
+      bullets: ['Premier point', 'Deuxième point', 'Troisième point'],
+      slideType: 'bullet-list',
+      textColor: '#ffffff',
+      backgroundGradient: 'linear-gradient(135deg,#1a1a2e,#16213e,#0f3460)',
+      fontSize: 'large',
+      textAlign: 'left',
+      textShadow: false,
+      showLogo: false,
+    },
+  },
+  {
+    id: 'visuel',
+    name: 'Visuel / Image',
+    Icon: ImageIcon,
+    iconColor: '#f9a8d4',
+    description: 'Affiche, invitation, flyer',
+    slide: {
+      title: '',
+      content: '',
+      slideType: 'image-full',
+      textColor: '#ffffff',
+      backgroundGradient: 'linear-gradient(135deg,#232526,#414345)',
+      fontSize: 'large',
+      textAlign: 'center',
+      textShadow: false,
+      showLogo: false,
+    },
+  },
+];
 
-  const createSlide = (overrides: Partial<CustomSlide> = {}): CustomSlide => ({
-    id: crypto.randomUUID(),
-    title: '',
+function makeSlide(template: SlideTemplate): CustomSlide {
+  return { id: genId(), ...template.slide };
+}
+
+function createSlide(type: SlideType): CustomSlide {
+  return {
+    id: genId(),
+    title: type === 'image-full' ? '' : 'Nouveau titre',
     content: '',
-    slideType: 'text-title',
-    bullets: [''],
-    backgroundColor: '#1a1a2e',
+    slideType: type,
     textColor: '#ffffff',
+    backgroundGradient: 'linear-gradient(135deg,#0f0c29,#302b63,#24243e)',
+    fontSize: 'large',
+    textAlign: 'center',
     textShadow: false,
-    ...overrides,
-  });
+    showLogo: false,
+  };
+}
 
-  const addSlide = (overrides: Partial<CustomSlide> = {}) => {
-    const newSlide = createSlide(overrides);
-    onSlidesChange([...slides, newSlide]);
-    setEditingId(newSlide.id);
-    onSelectSlide(newSlide);
+function SlideThumbnail({ slide }: { slide: CustomSlide }) {
+  const bg = slide.backgroundImage ? `url(${slide.backgroundImage})` : (slide.backgroundGradient ?? slide.backgroundColor ?? '#1a1a2e');
+  return (
+    <div
+      className="h-20 w-full rounded-lg overflow-hidden relative flex items-center justify-center shrink-0"
+      style={{
+        background: bg,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        color: slide.textColor ?? '#fff',
+      }}
+    >
+      {slide.slideType === 'image-full' && slide.backgroundImage && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <ImageIcon className="h-6 w-6 text-white/60" />
+        </div>
+      )}
+      {slide.slideType !== 'image-full' && (
+        <div className="px-2 text-center">
+          {slide.title && <p className="text-[9px] font-bold leading-tight line-clamp-1">{slide.title}</p>}
+          {slide.content && <p className="text-[8px] mt-0.5 line-clamp-2 opacity-80 leading-tight">{slide.content}</p>}
+          {slide.bullets && slide.bullets.length > 0 && <p className="text-[8px] mt-0.5 opacity-80 leading-tight">• {slide.bullets[0]}</p>}
+        </div>
+      )}
+      {slide.slideType === 'blank' && <span className="text-[10px] text-white/40">Vide</span>}
+    </div>
+  );
+}
+
+function TemplateThumbnail({ template }: { template: SlideTemplate }) {
+  const bg = (template.slide as CustomSlide).backgroundGradient ?? '#1a1a2e';
+  const { Icon, iconColor } = template;
+  return (
+    <div
+      className="h-16 w-full rounded-lg overflow-hidden flex items-center justify-center"
+      style={{ background: bg }}
+    >
+      <div className="text-center px-2">
+        <div className="flex justify-center mb-1">
+          <Icon className="h-5 w-5" style={{ color: iconColor }} />
+        </div>
+        <p className="text-[8px] font-bold opacity-90 leading-tight line-clamp-2" style={{ color: (template.slide as CustomSlide).textColor ?? '#fff' }}>
+          {template.name}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export default function SlidesEditor({ slides, onChange, onProjectSlide, currentProjectedSlide, onEditingSlide }: SlidesEditorProps) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [expandedEdit, setExpandedEdit] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const editingSlide = slides.find(s => s.id === editingId) ?? null;
+  void editingSlide;
+
+  const openEditing = (id: string | null) => {
+    setEditingId(id);
+    setExpandedEdit(false);
+    if (id === null) {
+      onEditingSlide?.(null);
+    } else {
+      const slide = slides.find(s => s.id === id) ?? null;
+      onEditingSlide?.(slide);
+    }
   };
 
-  const duplicateSlide = (slide: CustomSlide) => {
-    const dup: CustomSlide = { ...slide, id: crypto.randomUUID(), title: slide.title ? `${slide.title} (copie)` : '' };
-    const idx = slides.findIndex(s => s.id === slide.id);
+  const addSlide = (type: SlideType) => {
+    const slide = createSlide(type);
+    if (type === 'image-full') {
+      handleImageUploadForSlide(slide, (s) => {
+        onChange([...slides, s]);
+        setEditingId(s.id);
+        onEditingSlide?.(s);
+      });
+      return;
+    }
+    onChange([...slides, slide]);
+    setEditingId(slide.id);
+    onEditingSlide?.(slide);
+    setExpandedEdit(false);
+  };
+
+  const addFromTemplate = (template: SlideTemplate) => {
+    if (template.slide.slideType === 'image-full') {
+      const slide = makeSlide(template);
+      handleImageUploadForSlide(slide, (s) => {
+        onChange([...slides, s]);
+        setEditingId(s.id);
+        onEditingSlide?.(s);
+      });
+      setShowTemplates(false);
+      return;
+    }
+    const slide = makeSlide(template);
+    onChange([...slides, slide]);
+    setEditingId(slide.id);
+    onEditingSlide?.(slide);
+    setExpandedEdit(false);
+    setShowTemplates(false);
+  };
+
+  const updateSlide = (id: string, patch: Partial<CustomSlide>) => {
+    const updated = slides.map(s => s.id === id ? { ...s, ...patch } : s);
+    onChange(updated);
+    if (id === editingId) {
+      const updatedSlide = updated.find(s => s.id === id) ?? null;
+      onEditingSlide?.(updatedSlide);
+    }
+  };
+
+  const duplicateSlide = (id: string) => {
+    const idx = slides.findIndex(s => s.id === id);
+    if (idx < 0) return;
+    const clone: CustomSlide = { ...slides[idx], id: genId() };
     const arr = [...slides];
-    arr.splice(idx + 1, 0, dup);
-    onSlidesChange(arr);
-    setEditingId(dup.id);
-    onSelectSlide(dup);
-  };
-
-  const updateSlide = (id: string, updates: Partial<CustomSlide>) => {
-    const updated = slides.map(s => s.id === id ? { ...s, ...updates } : s);
-    onSlidesChange(updated);
-    const slide = updated.find(s => s.id === id);
-    if (slide) onSelectSlide(slide);
+    arr.splice(idx + 1, 0, clone);
+    onChange(arr);
   };
 
   const removeSlide = (id: string) => {
-    onSlidesChange(slides.filter(s => s.id !== id));
-    if (editingId === id) setEditingId(null);
+    onChange(slides.filter(s => s.id !== id));
+    if (editingId === id) {
+      setEditingId(null);
+      onEditingSlide?.(null);
+    }
   };
 
-  const handleImageUpload = (id: string, file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => updateSlide(id, { backgroundImage: e.target?.result as string, backgroundColor: undefined, backgroundGradient: undefined });
-    reader.readAsDataURL(file);
-  };
-
-  const handleDragStart = (id: string) => { dragItemRef.current = id; };
-  const handleDragOver = (e: React.DragEvent, id: string) => { e.preventDefault(); setDragOverId(id); };
-  const handleDrop = (targetId: string) => {
-    const fromId = dragItemRef.current;
-    if (!fromId || fromId === targetId) { setDragOverId(null); return; }
+  const moveSlide = (id: string, dir: -1 | 1) => {
+    const idx = slides.findIndex(s => s.id === id);
+    if (idx < 0) return;
+    const next = idx + dir;
+    if (next < 0 || next >= slides.length) return;
     const arr = [...slides];
-    const fromIdx = arr.findIndex(s => s.id === fromId);
-    const toIdx = arr.findIndex(s => s.id === targetId);
-    const [moved] = arr.splice(fromIdx, 1);
-    arr.splice(toIdx, 0, moved);
-    onSlidesChange(arr);
-    setDragOverId(null);
-    dragItemRef.current = null;
+    [arr[idx], arr[next]] = [arr[next], arr[idx]];
+    onChange(arr);
   };
-  const handleDragEnd = () => { setDragOverId(null); dragItemRef.current = null; };
 
-  const editing = slides.find(s => s.id === editingId);
+  function handleImageUploadForSlide(slide: CustomSlide, onDone: (s: CustomSlide) => void) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) { onDone(slide); return; }
+      if (file.size > 8 * 1024 * 1024) {
+        alert("Image trop grande (max 8 Mo). Compressez-la d'abord.");
+        onDone(slide);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (ev) => onDone({ ...slide, backgroundImage: ev.target?.result as string });
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  }
 
-  const addBullet = (id: string) => {
-    const slide = slides.find(s => s.id === id);
-    if (slide) updateSlide(id, { bullets: [...(slide.bullets || []), ''] });
-  };
-  const updateBullet = (id: string, idx: number, value: string) => {
+  const handleImageUpload = (id: string) => {
     const slide = slides.find(s => s.id === id);
     if (!slide) return;
-    const bullets = [...(slide.bullets || [])];
-    bullets[idx] = value;
-    updateSlide(id, { bullets });
+    handleImageUploadForSlide(slide, (updated) => updateSlide(id, { backgroundImage: updated.backgroundImage }));
   };
-  const removeBullet = (id: string, idx: number) => {
-    const slide = slides.find(s => s.id === id);
-    if (slide) updateSlide(id, { bullets: (slide.bullets || []).filter((_, i) => i !== idx) });
+
+  const handleImportVisual = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      if (file.size > 8 * 1024 * 1024) { alert('Image trop grande (max 8 Mo).'); return; }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const slide = createSlide('image-full');
+        slide.backgroundImage = ev.target?.result as string;
+        slide.title = file.name.replace(/\.[^/.]+$/, '');
+        onChange([...slides, slide]);
+        onProjectSlide?.(slide);
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  };
+
+  const handleExport = () => {
+    const slidesNoImg = slides.map(s => ({ ...s, backgroundImage: undefined }));
+    const json = JSON.stringify(slidesNoImg, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'biblecast-slides.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target?.result as string) as CustomSlide[];
+        if (Array.isArray(data)) {
+          onChange([...slides, ...data.map(s => ({ ...s, id: genId() }))]);
+        }
+      } catch { alert('Fichier JSON invalide.'); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Toolbar */}
-      <div className="p-3 border-b border-border flex items-center gap-2 shrink-0">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="sm" className="gap-1.5 btn-gold">
-              <Plus className="h-4 w-4" /> Nouvelle slide <ChevronDown className="h-3 w-3 opacity-70" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-60">
-            <DropdownMenuLabel className="text-xs text-muted-foreground">Types</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => addSlide({ slideType: 'text-title' })}><Type className="h-4 w-4 mr-2 text-blue-400" /> Texte + Titre</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => addSlide({ slideType: 'title-only' })}><AlignCenter className="h-4 w-4 mr-2 text-purple-400" /> Titre seul</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => addSlide({ slideType: 'verse-title' })}><BookOpen className="h-4 w-4 mr-2 text-primary" /> Verset + Titre</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => addSlide({ slideType: 'bullet-list', bullets: [''] })}><List className="h-4 w-4 mr-2 text-green-400" /> Liste à puces</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => addSlide({ slideType: 'blank' })}><Square className="h-4 w-4 mr-2 text-gray-400" /> Slide vide</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            {TEMPLATES.map(cat => (
-              <div key={cat.category}>
-                <DropdownMenuLabel className="text-xs text-muted-foreground">{cat.category}</DropdownMenuLabel>
-                {cat.items.map((tpl, i) => (
-                  <DropdownMenuItem key={i} onClick={() => addSlide(tpl)}>
-                    <Tag className="h-4 w-4 mr-2 text-primary/70" /> {tpl.title}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-              </div>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <div className="flex-1" />
-      </div>
+    <div className="flex flex-col h-full overflow-hidden">
 
-      <PanelGroup direction="horizontal" className="flex-1 overflow-hidden">
-        {/* Liste des slides */}
-        <Panel defaultSize={42} minSize={25} maxSize={65} className="overflow-hidden">
-          <div className="h-full overflow-y-auto overflow-x-hidden">
-            <div className="p-2 space-y-1.5 w-full">
-              {slides.length === 0 && (
-                <p className="text-muted-foreground text-xs text-center py-8 px-2">Aucune slide.<br />Cliquez "Nouvelle slide".</p>
-              )}
-              {slides.map((slide) => {
-                const sType: SlideType = slide.slideType || 'text-title';
-                const bgStyle = getSlideBackground(slide);
-                return (
-                  <div
-                    key={slide.id}
-                    draggable
-                    onDragStart={() => handleDragStart(slide.id)}
-                    onDragOver={(e) => handleDragOver(e, slide.id)}
-                    onDrop={() => handleDrop(slide.id)}
-                    onDragEnd={handleDragEnd}
-                    onClick={() => { setEditingId(slide.id); onSelectSlide(slide); }}
-                    className={cn(
-                      'p-2.5 rounded-lg cursor-pointer transition-all select-none overflow-hidden w-full',
-                      editingId === slide.id ? 'bg-primary/15 border border-primary/40' : 'bg-secondary/60 hover:bg-surface-hover border border-transparent',
-                      dragOverId === slide.id && 'border-primary border-dashed opacity-60'
-                    )}
-                  >
-                    {/* Mini thumbnail du fond */}
-                    <div className="h-10 w-full rounded-md mb-2 overflow-hidden relative flex items-center justify-center" style={bgStyle}>
-                      {slide.backgroundImage && <div className="absolute inset-0 bg-black/20" />}
-                      <span className="relative z-10 text-[10px] font-bold text-white/80 truncate px-1 text-center leading-tight">
-                        {slide.title || <span className="italic opacity-50">Sans titre</span>}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${TYPE_COLORS[sType]}`}>{TYPE_LABELS[sType]}</span>
-                      <p className="text-[10px] text-muted-foreground truncate flex-1 min-w-0">
-                        {sType === 'bullet-list' ? (slide.bullets || []).filter(Boolean).join(' · ') : slide.content || ''}
-                      </p>
-                      <div className="flex gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
-                        <Button size="icon" variant="ghost" className="h-6 w-6 text-primary" onClick={() => onSendSlide(slide)}><Send className="h-3 w-3" /></Button>
-                        <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={() => duplicateSlide(slide)}><Copy className="h-3 w-3" /></Button>
-                        <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => removeSlide(slide.id)}><Trash2 className="h-3 w-3" /></Button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+      {/* Modal Templates */}
+      {showTemplates && (
+        <div className="absolute inset-0 z-50 flex flex-col bg-background/98 backdrop-blur-sm rounded-xl">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border/40">
+            <div className="flex items-center gap-2">
+              <LayoutTemplate className="h-4 w-4 text-primary" />
+              <span className="font-semibold text-sm">Templates de diapositives</span>
+            </div>
+            <button onClick={() => setShowTemplates(false)}
+              className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground transition-smooth">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 grid grid-cols-2 gap-2.5 content-start">
+            {SLIDE_TEMPLATES.map(tpl => (
+              <button
+                key={tpl.id}
+                onClick={() => addFromTemplate(tpl)}
+                className="flex flex-col rounded-xl border border-border/40 bg-secondary/30 hover:bg-secondary/70 hover:border-primary/30 overflow-hidden transition-smooth text-left"
+              >
+                <TemplateThumbnail template={tpl} />
+                <div className="px-2.5 py-2">
+                  <p className="text-xs font-semibold text-foreground leading-tight">{tpl.name}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{tpl.description}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* En-tête */}
+      <div className="shrink-0 px-2 pt-2 pb-1 space-y-2">
+        <div className="flex gap-1 flex-wrap">
+          <button
+            onClick={() => setShowTemplates(true)}
+            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-primary/15 hover:bg-primary/25 border border-primary/30 text-xs text-primary font-medium transition-smooth"
+          >
+            <LayoutTemplate className="h-3.5 w-3.5" />
+            Templates
+          </button>
+          <button onClick={() => addSlide('text-title')}
+            className="flex-1 min-w-[72px] flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-border/50 bg-secondary/30 hover:bg-secondary/70 text-xs text-muted-foreground hover:text-foreground transition-smooth">
+            <Plus className="h-3.5 w-3.5" /> Titre+Texte
+          </button>
+          <button onClick={() => addSlide('bullet-list')}
+            className="flex-1 min-w-[72px] flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-border/50 bg-secondary/30 hover:bg-secondary/70 text-xs text-muted-foreground hover:text-foreground transition-smooth">
+            <Plus className="h-3.5 w-3.5" /> Liste
+          </button>
+          <button onClick={handleImportVisual}
+            className="flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-dashed border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10 text-xs text-amber-400 hover:text-amber-300 transition-smooth">
+            <ImageIcon className="h-3.5 w-3.5" /> Visuel
+          </button>
+        </div>
+        {slides.length > 0 && (
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[10px] text-muted-foreground">{slides.length} diapositive{slides.length > 1 ? 's' : ''}</span>
+            <div className="flex gap-1">
+              <button onClick={handleExport} title="Exporter les slides (JSON)"
+                className="h-6 w-6 rounded border border-border/40 flex items-center justify-center text-muted-foreground hover:text-foreground transition-smooth">
+                <Download className="h-3 w-3" />
+              </button>
+              <label title="Importer des slides (JSON)" className="h-6 w-6 rounded border border-border/40 flex items-center justify-center text-muted-foreground hover:text-foreground transition-smooth cursor-pointer">
+                <Upload className="h-3 w-3" />
+                <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+              </label>
             </div>
           </div>
-        </Panel>
+        )}
+      </div>
 
-        <ColResizeHandle />
+      {/* Liste des slides */}
+      <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-2">
+        {slides.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full text-center py-8 space-y-3 px-4">
+            <LayoutTemplate className="h-10 w-10 text-muted-foreground/20" />
+            <p className="text-sm text-muted-foreground">Aucune diapositive</p>
+            <p className="text-xs text-muted-foreground/50">Utilisez les Templates ou les boutons ci-dessus</p>
+            <button
+              onClick={() => setShowTemplates(true)}
+              className="mt-2 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary/15 hover:bg-primary/25 border border-primary/30 text-sm text-primary font-medium transition-smooth"
+            >
+              <LayoutTemplate className="h-4 w-4" />
+              Choisir un template
+            </button>
+          </div>
+        )}
 
-        {/* Éditeur */}
-        <Panel className="overflow-hidden">
-          <ScrollArea className="h-full">
-            <div className="p-4">
-              {!editing ? (
-                <p className="text-muted-foreground text-sm text-center mt-8">Sélectionnez ou créez une slide.</p>
-              ) : (
-                <div className="space-y-5">
-                  {/* Type selector */}
-                  <div>
-                    <Label className="text-xs text-muted-foreground mb-2 block">Type de slide</Label>
-                    <div className="space-y-1">
-                      {SLIDE_TYPES.map(({ type, label, icon, desc }) => (
-                        <button key={type} onClick={() => updateSlide(editing.id, { slideType: type })}
-                          className={cn('flex items-center gap-2.5 w-full p-2 rounded-lg border text-left transition-all text-xs',
-                            (editing.slideType || 'text-title') === type
-                              ? 'border-primary/50 bg-primary/10 text-foreground'
-                              : 'border-border/40 bg-secondary/40 text-muted-foreground hover:bg-secondary/80'
+        {slides.map((slide, idx) => {
+          const isEditing = editingId === slide.id;
+          const isProjected = currentProjectedSlide?.id === slide.id;
+          return (
+            <div key={slide.id}
+              className={cn('rounded-xl border transition-all overflow-hidden',
+                isEditing ? 'border-primary/40 bg-primary/5' : isProjected ? 'border-green-500/30 bg-green-500/5' : 'border-border/40 bg-secondary/30'
+              )}>
+              {/* Thumbnail + actions rapides */}
+              <div className="p-2">
+                <SlideThumbnail slide={slide} />
+                <div className="flex items-center gap-1 mt-2">
+                  {isProjected && <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />}
+                  <span className="text-[10px] text-muted-foreground flex-1 truncate font-medium flex items-center gap-1">
+                    <span className="text-muted-foreground/60">{SLIDE_TYPE_ICON_COMPONENTS[slide.slideType]}</span>
+                    {slide.title || SLIDE_TYPE_LABELS[slide.slideType]}
+                  </span>
+                  <div className="flex gap-1">
+                    <button onClick={() => moveSlide(slide.id, -1)} disabled={idx === 0}
+                      className="h-6 w-6 rounded border border-border/30 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-30 transition-smooth">
+                      <ChevronUp className="h-3 w-3" />
+                    </button>
+                    <button onClick={() => moveSlide(slide.id, 1)} disabled={idx === slides.length - 1}
+                      className="h-6 w-6 rounded border border-border/30 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-30 transition-smooth">
+                      <ChevronDown className="h-3 w-3" />
+                    </button>
+                    {onProjectSlide && (
+                      <button onClick={() => onProjectSlide(slide)} title="Projeter sur l'écran"
+                        className={cn('h-6 w-6 rounded border flex items-center justify-center transition-smooth',
+                          isProjected ? 'border-green-500/50 bg-green-500/20 text-green-400' : 'border-border/30 text-muted-foreground hover:text-primary hover:border-primary/30'
+                        )}>
+                        <Send className="h-3 w-3" />
+                      </button>
+                    )}
+                    <button onClick={() => duplicateSlide(slide.id)} title="Dupliquer"
+                      className="h-6 w-6 rounded border border-border/30 flex items-center justify-center text-muted-foreground hover:text-foreground transition-smooth">
+                      <Copy className="h-3 w-3" />
+                    </button>
+                    <button onClick={() => openEditing(isEditing ? null : slide.id)}
+                      className={cn('h-6 w-6 rounded border flex items-center justify-center transition-smooth',
+                        isEditing ? 'border-primary/50 bg-primary/20 text-primary' : 'border-border/30 text-muted-foreground hover:text-foreground'
+                      )}>
+                      <Edit3 className="h-3 w-3" />
+                    </button>
+                    <button onClick={() => removeSlide(slide.id)}
+                      className="h-6 w-6 rounded border border-border/30 flex items-center justify-center text-muted-foreground hover:text-destructive transition-smooth">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Panneau d'édition inline */}
+              {isEditing && (
+                <div className="border-t border-border/40 p-3 space-y-3">
+                  {/* Type de slide */}
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Type</Label>
+                    <div className="flex gap-1 flex-wrap">
+                      {(Object.keys(SLIDE_TYPE_LABELS) as SlideType[]).map(t => (
+                        <button key={t} onClick={() => updateSlide(slide.id, { slideType: t })}
+                          className={cn('px-2 py-1 rounded-lg border text-[10px] transition-smooth flex items-center gap-1',
+                            slide.slideType === t ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border/40 bg-secondary/40 text-muted-foreground hover:text-foreground'
                           )}>
-                          <span className={`p-1 rounded ${TYPE_COLORS[type]}`}>{icon}</span>
-                          <span className="font-medium">{label}</span>
-                          <span className="text-muted-foreground ml-1">{desc}</span>
+                          <span className="opacity-70">{SLIDE_TYPE_ICON_COMPONENTS[t]}</span>
+                          {SLIDE_TYPE_LABELS[t]}
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  {/* Titre */}
-                  {(editing.slideType || 'text-title') !== 'blank' && (
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Titre</Label>
-                      <Input value={editing.title} onChange={(e) => updateSlide(editing.id, { title: e.target.value })}
-                        placeholder="Titre de la slide" className="bg-secondary mt-1" />
-                    </div>
-                  )}
-
-                  {/* Contenu */}
-                  {((editing.slideType || 'text-title') === 'text-title' || editing.slideType === 'verse-title') && (
-                    <div>
-                      <Label className="text-xs text-muted-foreground">
-                        {editing.slideType === 'verse-title' ? 'Texte du verset' : 'Contenu'}
-                      </Label>
-                      <Textarea value={editing.content}
-                        onChange={(e) => updateSlide(editing.id, { content: e.target.value })}
-                        placeholder={editing.slideType === 'verse-title' ? 'Ex: Car Dieu a tant aimé le monde...' : 'Texte libre...'}
-                        className="bg-secondary min-h-[90px] mt-1" />
-                    </div>
-                  )}
-
-                  {/* Liste à puces */}
-                  {editing.slideType === 'bullet-list' && (
-                    <div>
-                      <Label className="text-xs text-muted-foreground mb-2 block">Points</Label>
-                      <div className="space-y-2">
-                        {(editing.bullets || []).map((bullet, idx) => (
-                          <div key={idx} className="flex gap-2 items-center">
-                            <span className="text-primary text-sm shrink-0">•</span>
-                            <Input value={bullet} onChange={(e) => updateBullet(editing.id, idx, e.target.value)}
-                              placeholder={`Point ${idx + 1}`} className="bg-secondary flex-1 h-8 text-sm" />
-                            <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
-                              onClick={() => removeBullet(editing.id, idx)}><Trash2 className="h-3 w-3" /></Button>
-                          </div>
-                        ))}
-                        <Button size="sm" variant="secondary" onClick={() => addBullet(editing.id)} className="w-full gap-1.5 h-8 text-xs mt-1">
-                          <Plus className="h-3 w-3" /> Ajouter un point
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ─── Couleur du texte ─── */}
-                  {(editing.slideType || 'text-title') !== 'blank' && (
-                    <div>
-                      <Label className="text-xs text-muted-foreground mb-2 block flex items-center gap-1.5">
-                        <Palette className="h-3.5 w-3.5" /> Couleur du texte
-                      </Label>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {TEXT_COLORS.map(color => (
-                          <button key={color} onClick={() => updateSlide(editing.id, { textColor: color })}
-                            className={cn('w-7 h-7 rounded-full border-2 transition-all',
-                              editing.textColor === color ? 'border-primary scale-110' : 'border-border/50 hover:border-primary/50'
-                            )}
-                            style={{ backgroundColor: color }}
-                            title={color}
-                          />
-                        ))}
-                        <div className="relative" title="Couleur personnalisée">
-                          <input type="color"
-                            value={editing.textColor || '#ffffff'}
-                            onChange={(e) => updateSlide(editing.id, { textColor: e.target.value })}
-                            className="w-7 h-7 rounded-full cursor-pointer border border-border/50 bg-transparent p-0.5"
-                            style={{ appearance: 'none' }}
-                          />
-                          <span className="absolute -bottom-0.5 -right-0.5 text-[8px] leading-none">🎨</span>
-                        </div>
-                      </div>
-                      {/* Ombre du texte */}
-                      <button
-                        onClick={() => updateSlide(editing.id, { textShadow: !editing.textShadow })}
-                        className={cn('mt-2 flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-lg border transition-all',
-                          editing.textShadow ? 'border-primary/50 bg-primary/10 text-foreground' : 'border-border/40 bg-secondary/40 text-muted-foreground hover:bg-secondary/80'
-                        )}
-                      >
-                        <Sparkles className="h-3 w-3" />
-                        Ombre du texte {editing.textShadow ? '(activée)' : '(désactivée)'}
-                      </button>
-                    </div>
-                  )}
-
-                  {/* ─── Fond ─── */}
-                  <div>
-                    <Label className="text-xs text-muted-foreground mb-2 block">Fond</Label>
-
-                    {/* Tabs: Couleur | Dégradé | Image */}
-                    <div className="flex gap-1 mb-3">
-                      {(['solid', 'gradient'] as const).map(tab => (
-                        <button key={tab} onClick={() => setBgTab(tab)}
-                          className={cn('flex-1 py-1.5 text-xs rounded-lg border transition-all',
-                            bgTab === tab ? 'border-primary/50 bg-primary/10 text-foreground font-medium' : 'border-border/40 bg-secondary/40 text-muted-foreground hover:bg-secondary/80'
-                          )}>
-                          {tab === 'solid' ? 'Couleurs' : 'Dégradés'}
-                        </button>
-                      ))}
-                    </div>
-
-                    {bgTab === 'solid' && (
-                      <div className="grid grid-cols-10 gap-1.5">
-                        {SOLID_COLORS.map(color => (
-                          <button key={color} onClick={() => updateSlide(editing.id, { backgroundColor: color, backgroundGradient: undefined, backgroundImage: undefined })}
-                            className={cn('w-full aspect-square rounded-md border-2 transition-all',
-                              editing.backgroundColor === color && !editing.backgroundGradient && !editing.backgroundImage
-                                ? 'border-primary scale-110' : 'border-border/30 hover:border-primary/50'
-                            )}
-                            style={{ backgroundColor: color }}
-                            title={color}
-                          />
-                        ))}
-                      </div>
-                    )}
-
-                    {bgTab === 'gradient' && (
-                      <div className="grid grid-cols-2 gap-2">
-                        {GRADIENT_PRESETS.map(preset => (
-                          <button key={preset.label} onClick={() => updateSlide(editing.id, { backgroundGradient: preset.value, backgroundColor: undefined, backgroundImage: undefined })}
-                            className={cn('h-12 rounded-lg border-2 transition-all text-xs font-medium text-white/80',
-                              editing.backgroundGradient === preset.value ? 'border-primary scale-[1.02]' : 'border-border/30 hover:border-primary/50'
-                            )}
-                            style={{ background: preset.value }}
-                          >
-                            {preset.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Image de fond */}
-                    <div className="mt-3">
-                      <div className="flex gap-2 items-center">
-                        <Button size="sm" variant="secondary" className="gap-1.5 h-8 text-xs"
-                          onClick={() => {
-                            const input = document.createElement('input');
-                            input.type = 'file'; input.accept = 'image/*';
-                            input.onchange = (e) => {
-                              const f = (e.target as HTMLInputElement).files?.[0];
-                              if (f) handleImageUpload(editing.id, f);
-                            };
-                            input.click();
-                          }}>
-                          <Upload className="h-3.5 w-3.5" /> Image de fond
-                        </Button>
-                        {editing.backgroundImage && (
-                          <Button size="sm" variant="ghost" className="h-8 text-xs text-destructive"
-                            onClick={() => updateSlide(editing.id, { backgroundImage: undefined })}>
-                            Supprimer
-                          </Button>
-                        )}
-                      </div>
-                      {editing.backgroundImage && (
-                        <div className="mt-2 h-20 rounded-lg overflow-hidden border border-border/40">
-                          <img src={editing.backgroundImage} className="w-full h-full object-cover" alt="" />
+                  {slide.slideType !== 'image-full' && (
+                    <>
+                      {/* Titre */}
+                      {slide.slideType !== 'verse-title' && (
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Titre</Label>
+                          <Input value={slide.title} onChange={e => updateSlide(slide.id, { title: e.target.value })}
+                            placeholder="Titre de la diapositive" className="h-8 text-sm bg-secondary border-border/50" />
                         </div>
                       )}
-                    </div>
 
-                    {/* Toggle logo d'église */}
-                    {loadSettings().churchLogo && (
-                      <div className="mt-3">
-                        <button
-                          onClick={() => updateSlide(editing.id, { showLogo: !editing.showLogo })}
-                          className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border transition-colors w-full ${
-                            editing.showLogo
-                              ? 'border-amber-500/60 bg-amber-500/10 text-amber-400'
-                              : 'border-border/40 bg-secondary/40 text-muted-foreground hover:border-border'
-                          }`}
-                        >
-                          <Image className="h-3.5 w-3.5" />
-                          Logo d'église {editing.showLogo ? '(affiché)' : '(masqué)'}
+                      {/* Taille du titre */}
+                      {slide.slideType !== 'title-only' && slide.slideType !== 'verse-title' && (
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Taille du titre</Label>
+                          <div className="flex gap-1">
+                            {FONT_SIZE_OPTIONS.map(opt => (
+                              <button key={opt.value}
+                                onClick={() => updateSlide(slide.id, { titleFontSize: opt.value })}
+                                className={cn('flex-1 py-1.5 rounded-lg border text-[10px] font-medium transition-smooth',
+                                  (slide.titleFontSize ?? 'medium') === opt.value ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border/40 bg-secondary/40 text-muted-foreground hover:text-foreground'
+                                )}>
+                                {opt.desc}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {['text-title', 'verse-title', 'blank'].includes(slide.slideType) && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Contenu</Label>
+                            <button onClick={() => setExpandedEdit(!expandedEdit)}
+                              title={expandedEdit ? 'Réduire' : "Agrandir l'éditeur"}
+                              className="h-5 w-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-smooth rounded">
+                              {expandedEdit ? <X className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                            </button>
+                          </div>
+                          <textarea
+                            value={slide.content}
+                            onChange={e => updateSlide(slide.id, { content: e.target.value })}
+                            placeholder="Saisissez le contenu…"
+                            className={cn(
+                              'w-full rounded-lg border border-border/50 bg-secondary text-sm px-3 py-2 resize-y text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-smooth',
+                              expandedEdit ? 'min-h-[200px]' : 'min-h-[100px]'
+                            )}
+                            style={{ fontFamily: 'inherit', lineHeight: 1.6 }}
+                          />
+                          <p className="text-[9px] text-muted-foreground/40 text-right">{(slide.content || '').length} car.</p>
+                        </div>
+                      )}
+
+                      {slide.slideType === 'bullet-list' && (
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Points (un par ligne)</Label>
+                          <textarea
+                            value={(slide.bullets ?? []).join('\n')}
+                            onChange={e => updateSlide(slide.id, { bullets: e.target.value.split('\n') })}
+                            placeholder={"Premier point\nDeuxième point\nTroisième point"}
+                            className="w-full min-h-[100px] rounded-lg border border-border/50 bg-secondary text-sm px-3 py-2 resize-y text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-smooth"
+                            style={{ fontFamily: 'inherit', lineHeight: 1.6 }}
+                          />
+                        </div>
+                      )}
+
+                      {/* Taille du texte */}
+                      <div className="space-y-1.5">
+                        <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Taille du texte</Label>
+                        <div className="flex gap-1">
+                          {FONT_SIZE_OPTIONS.map(opt => (
+                            <button key={opt.value}
+                              onClick={() => updateSlide(slide.id, { fontSize: opt.value })}
+                              className={cn('flex-1 py-1.5 rounded-lg border text-[10px] font-medium transition-smooth',
+                                slide.fontSize === opt.value ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border/40 bg-secondary/40 text-muted-foreground hover:text-foreground'
+                              )}>
+                              {opt.desc}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Alignement */}
+                      <div className="space-y-1.5">
+                        <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Alignement</Label>
+                        <div className="flex gap-1">
+                          {([
+                            { v: 'left', icon: <AlignLeft className="h-3.5 w-3.5" /> },
+                            { v: 'center', icon: <AlignCenter className="h-3.5 w-3.5" /> },
+                            { v: 'right', icon: <AlignRight className="h-3.5 w-3.5" /> },
+                          ] as const).map(({ v, icon }) => (
+                            <button key={v} onClick={() => updateSlide(slide.id, { textAlign: v })}
+                              className={cn('flex-1 h-8 rounded-lg border flex items-center justify-center transition-smooth',
+                                slide.textAlign === v ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border/40 bg-secondary/40 text-muted-foreground hover:text-foreground'
+                              )}>
+                              {icon}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Fond */}
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                      {slide.slideType === 'image-full' ? 'Image' : 'Fond'}
+                    </Label>
+                    <div className="flex gap-1 flex-wrap">
+                      {slide.slideType !== 'image-full' && GRADIENT_PRESETS.map(g => (
+                        <button key={g.value}
+                          onClick={() => updateSlide(slide.id, { backgroundGradient: g.value, backgroundImage: undefined })}
+                          title={g.label}
+                          className={cn('h-7 w-7 rounded-lg border transition-smooth',
+                            slide.backgroundGradient === g.value ? 'border-primary/80 ring-1 ring-primary' : 'border-border/30 hover:border-white/50'
+                          )}
+                          style={{ background: g.value }}
+                        />
+                      ))}
+                      <button onClick={() => handleImageUpload(slide.id)}
+                        className={cn(
+                          'flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] text-muted-foreground hover:text-foreground transition-smooth',
+                          slide.backgroundImage ? 'border-amber-500/50 bg-amber-500/10 text-amber-400' : 'border-border/40 bg-secondary/40'
+                        )}>
+                        <ImageIcon className="h-3.5 w-3.5" />
+                        {slide.backgroundImage ? 'Changer' : 'Image'}
+                      </button>
+                      {slide.backgroundImage && (
+                        <button onClick={() => updateSlide(slide.id, { backgroundImage: undefined })}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg border border-border/40 bg-secondary/40 text-[10px] text-destructive/80 hover:text-destructive transition-smooth">
+                          <X className="h-3 w-3" /> Retirer
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {slide.slideType !== 'image-full' && (
+                    <>
+                      {/* Couleur du texte */}
+                      <div className="space-y-1.5">
+                        <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Couleur du texte</Label>
+                        <div className="flex gap-1.5 items-center flex-wrap">
+                          {TEXT_COLORS.map(c => (
+                            <button key={c}
+                              onClick={() => updateSlide(slide.id, { textColor: c })}
+                              className={cn('h-6 w-6 rounded-full border transition-smooth',
+                                slide.textColor === c ? 'border-2 border-white scale-110' : 'border-border/30 hover:scale-105'
+                              )}
+                              style={{ background: c }}
+                            />
+                          ))}
+                          <label className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-pointer">
+                            <input type="color" value={slide.textColor ?? '#ffffff'}
+                              onChange={e => updateSlide(slide.id, { textColor: e.target.value })}
+                              className="h-6 w-6 rounded border border-border/30 cursor-pointer bg-transparent" />
+                            Autre
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Options */}
+                      <div className="flex gap-2 flex-wrap">
+                        <button onClick={() => updateSlide(slide.id, { textShadow: !slide.textShadow })}
+                          className={cn('px-2 py-1 rounded-lg border text-[10px] transition-smooth',
+                            slide.textShadow ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border/40 bg-secondary/40 text-muted-foreground hover:text-foreground'
+                          )}>
+                          Ombre texte
+                        </button>
+                        <button onClick={() => updateSlide(slide.id, { showLogo: !slide.showLogo })}
+                          className={cn('px-2 py-1 rounded-lg border text-[10px] transition-smooth',
+                            slide.showLogo ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border/40 bg-secondary/40 text-muted-foreground hover:text-foreground'
+                          )}>
+                          Logo église
                         </button>
                       </div>
-                    )}
-                  </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
-          </ScrollArea>
-        </Panel>
-      </PanelGroup>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -1,384 +1,383 @@
-/* Composant de recherche et navigation biblique */
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Search, ChevronRight, BookOpen, ListPlus, CheckSquare2, Square, Clock } from 'lucide-react';
+/* Composant BibleSearch — navigation livre → chapitre → verset
+   Nouvelles fonctionnalités: filtre A-Z, double version Bible, persistance état */
+import { useState, useMemo, useCallback, useRef } from 'react';
+import { Search, BookOpen, ChevronRight, ChevronLeft, BookMarked, Layers2, Plus, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Checkbox } from '@/components/ui/checkbox';
+import { cn } from '@/lib/utils';
 import type { BibleData, VerseReference } from '@/types/bible';
-import { BIBLE_BOOKS, getChapters, getVerses, getVerseText, searchBible } from '@/lib/bible';
+import { getChapters, getVerses, getVerseText, searchBible, BIBLE_BOOKS } from '@/lib/bible';
 
-const RECENT_BOOKS_KEY = 'biblecast:recent-books';
-const MAX_RECENT = 5;
+type View = 'books' | 'chapters' | 'verses' | 'search';
 
-function getRecentBooks(): string[] {
-  try { return JSON.parse(localStorage.getItem(RECENT_BOOKS_KEY) || '[]'); }
-  catch { return []; }
-}
-
-function addRecentBook(book: string) {
-  try {
-    const prev = getRecentBooks().filter(b => b !== book);
-    localStorage.setItem(RECENT_BOOKS_KEY, JSON.stringify([book, ...prev].slice(0, MAX_RECENT)));
-  } catch { }
-}
-
-/* C1 — Surbrillance des mots-clés */
-function HighlightText({ text, query }: { text: string; query: string }) {
-  if (!query || query.length < 2) return <>{text}</>;
-  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const parts = text.split(new RegExp(`(${escapedQuery})`, 'gi'));
-  return (
-    <>
-      {parts.map((part, i) =>
-        part.toLowerCase() === query.toLowerCase()
-          ? <mark key={i} className="bg-primary/25 text-primary rounded-[2px] not-italic font-medium">{part}</mark>
-          : part
-      )}
-    </>
-  );
+export interface BibleNavState {
+  view: View;
+  selectedBook: string | null;
+  selectedChapter: number | null;
+  searchQuery: string;
+  alphaFilter: string | null;
 }
 
 interface BibleSearchProps {
   bible: BibleData | null;
+  bible2?: BibleData | null;
+  bible2Name?: string;
+  navState?: BibleNavState;
+  onNavStateChange?: (s: BibleNavState) => void;
   onSelectVerse: (verse: VerseReference) => void;
+  onSelectVerse2?: (verse: VerseReference | null) => void;
   onProjectVerse?: (verse: VerseReference) => void;
   onAddMultipleVerses?: (verses: VerseReference[]) => void;
   currentProjectedVerse?: VerseReference | null;
 }
 
+const INITIAL_NAV: BibleNavState = { view: 'books', selectedBook: null, selectedChapter: null, searchQuery: '', alphaFilter: null };
+
+const ALPHA_LETTERS = ['A', 'B', 'C', 'D', 'E', 'É', 'G', 'H', 'J', 'L', 'M', 'N', 'O', 'P', 'R', 'S', 'T', 'Z'];
+
 export default function BibleSearch({
-  bible, onSelectVerse, onProjectVerse, onAddMultipleVerses, currentProjectedVerse
+  bible, bible2, bible2Name = 'BDS',
+  navState: externalNav, onNavStateChange,
+  onSelectVerse, onSelectVerse2,
+  onProjectVerse, onAddMultipleVerses,
+  currentProjectedVerse,
 }: BibleSearchProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedBook, setSelectedBook] = useState<string | null>(null);
-  const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
-  const [mode, setMode] = useState<'books' | 'chapters' | 'verses' | 'search'>('books');
-  const [multiSelected, setMultiSelected] = useState<Set<number>>(new Set());
-  const [recentBooks, setRecentBooks] = useState<string[]>(getRecentBooks);
+  const [internalNav, setInternalNav] = useState<BibleNavState>(INITIAL_NAV);
+  const nav = externalNav ?? internalNav;
 
-  /* Sync recent books on storage changes */
-  useEffect(() => {
-    setRecentBooks(getRecentBooks());
-  }, [selectedBook]);
+  const setNav = useCallback((update: Partial<BibleNavState> | ((prev: BibleNavState) => BibleNavState)) => {
+    const next = typeof update === 'function' ? update(nav) : { ...nav, ...update };
+    if (onNavStateChange) onNavStateChange(next);
+    else setInternalNav(next);
+  }, [nav, onNavStateChange]);
 
-  const searchResults = useMemo(() => {
-    if (!bible || searchQuery.length < 2) return [];
-    return searchBible(bible, searchQuery);
-  }, [bible, searchQuery]);
-
-  const chapters = useMemo(() => {
-    if (!bible || !selectedBook) return [];
-    return getChapters(bible, selectedBook);
-  }, [bible, selectedBook]);
-
-  const verses = useMemo(() => {
-    if (!bible || !selectedBook || selectedChapter === null) return [];
-    return getVerses(bible, selectedBook, selectedChapter);
-  }, [bible, selectedBook, selectedChapter]);
-
-  const handleBookSelect = useCallback((book: string) => {
-    setSelectedBook(book);
-    setSelectedChapter(null);
-    setMode('chapters');
-    setMultiSelected(new Set());
-    addRecentBook(book);
-    setRecentBooks(getRecentBooks());
-  }, []);
-
-  const handleChapterSelect = useCallback((chapter: number) => {
-    setSelectedChapter(chapter);
-    setMode('verses');
-    setMultiSelected(new Set());
-  }, []);
-
-  const handleVerseSelect = useCallback((verseNum: number) => {
-    if (!bible || !selectedBook || selectedChapter === null) return;
-    const text = getVerseText(bible, selectedBook, selectedChapter, verseNum);
-    onSelectVerse({ book: selectedBook, chapter: selectedChapter, verse: verseNum, text });
-  }, [bible, selectedBook, selectedChapter, onSelectVerse]);
-
-  const toggleVerseSelection = useCallback((verseNum: number) => {
-    setMultiSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(verseNum)) next.delete(verseNum);
-      else next.add(verseNum);
-      return next;
-    });
-  }, []);
-
-  const handleSelectAll = useCallback(() => {
-    if (multiSelected.size === verses.length) {
-      setMultiSelected(new Set());
-    } else {
-      setMultiSelected(new Set(verses));
-    }
-  }, [multiSelected.size, verses]);
-
-  const handleAddMultipleToQueue = useCallback(() => {
-    if (!bible || !selectedBook || selectedChapter === null || !onAddMultipleVerses) return;
-    const refs: VerseReference[] = Array.from(multiSelected)
-      .sort((a, b) => a - b)
-      .map(v => ({
-        book: selectedBook,
-        chapter: selectedChapter,
-        verse: v,
-        text: getVerseText(bible, selectedBook, selectedChapter, v),
-      }));
-    onAddMultipleVerses(refs);
-    setMultiSelected(new Set());
-  }, [bible, selectedBook, selectedChapter, multiSelected, onAddMultipleVerses]);
+  const [dualMode, setDualMode] = useState(false);
+  const [selectedVerses, setSelectedVerses] = useState<VerseReference[]>([]);
+  const [multiSelect, setMultiSelect] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const hasBible2 = useMemo(() => bible2 ? Object.keys(bible2).length > 0 : false, [bible2]);
 
   const availableBooks = useMemo(() => {
     if (!bible) return [];
     return BIBLE_BOOKS.filter(b => bible[b]);
   }, [bible]);
 
-  const allSelected = verses.length > 0 && multiSelected.size === verses.length;
+  const filteredBooks = useMemo(() => {
+    const base = nav.alphaFilter
+      ? availableBooks.filter(b => {
+          const first = b.replace(/^\d+\s*/, '')[0]?.toUpperCase();
+          return first === nav.alphaFilter ||
+            (nav.alphaFilter === 'É' && first === 'É');
+        })
+      : availableBooks;
+    return base;
+  }, [availableBooks, nav.alphaFilter]);
 
-  const isCurrentlyProjected = (v: number) =>
-    currentProjectedVerse !== null &&
-    currentProjectedVerse !== undefined &&
-    currentProjectedVerse.book === selectedBook &&
-    currentProjectedVerse.chapter === selectedChapter &&
-    currentProjectedVerse.verse === v;
+  const searchResults = useMemo(() => {
+    if (nav.view !== 'search' || !bible || nav.searchQuery.length < 2) return [];
+    return searchBible(bible, nav.searchQuery, 60);
+  }, [bible, nav.searchQuery, nav.view]);
 
-  const isSearchResultProjected = (r: { book: string; chapter: number; verse: number }) =>
-    currentProjectedVerse !== null &&
-    currentProjectedVerse !== undefined &&
-    currentProjectedVerse.book === r.book &&
-    currentProjectedVerse.chapter === r.chapter &&
-    currentProjectedVerse.verse === r.verse;
+  const chapters = useMemo(() => {
+    if (!bible || !nav.selectedBook) return [];
+    return getChapters(bible, nav.selectedBook);
+  }, [bible, nav.selectedBook]);
 
-  return (
-    <div className="flex flex-col h-full">
-      {/* Barre de recherche */}
-      <div className="p-3 border-b border-border">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Rechercher ou ref. (Jean 3:16)…"
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-              if (e.target.value.length >= 2) setMode('search');
-              else if (mode === 'search') setMode('books');
-            }}
-            className="pl-9 bg-secondary/80 border-border focus:border-primary/50 transition-smooth"
-          />
+  const verses = useMemo(() => {
+    if (!bible || !nav.selectedBook || !nav.selectedChapter) return [];
+    return getVerses(bible, nav.selectedBook, nav.selectedChapter);
+  }, [bible, nav.selectedBook, nav.selectedChapter]);
+
+  const handleSelectVerse = useCallback((verse: VerseReference) => {
+    onSelectVerse(verse);
+    if (dualMode && hasBible2 && bible2) {
+      const text2 = getVerseText(bible2, verse.book, verse.chapter, verse.verse);
+      onSelectVerse2?.(text2 ? { ...verse, text: text2 } : null);
+    } else {
+      onSelectVerse2?.(null);
+    }
+  }, [onSelectVerse, onSelectVerse2, dualMode, hasBible2, bible2]);
+
+  const handleDoubleClickVerse = useCallback((verse: VerseReference) => {
+    handleSelectVerse(verse);
+    onProjectVerse?.(verse);
+  }, [handleSelectVerse, onProjectVerse]);
+
+  const toggleMultiSelect = (verse: VerseReference) => {
+    setSelectedVerses(prev =>
+      prev.find(v => v.book === verse.book && v.chapter === verse.chapter && v.verse === verse.verse)
+        ? prev.filter(v => !(v.book === verse.book && v.chapter === verse.chapter && v.verse === verse.verse))
+        : [...prev, verse]
+    );
+  };
+
+  if (!bible) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center space-y-2">
+          <BookOpen className="h-8 w-8 text-muted-foreground mx-auto animate-pulse" />
+          <p className="text-sm text-muted-foreground">Chargement de la Bible…</p>
         </div>
       </div>
+    );
+  }
 
-      {/* Navigation breadcrumb */}
-      {mode !== 'books' && mode !== 'search' && (
-        <div className="flex items-center gap-1 px-3 py-2 text-sm text-muted-foreground border-b border-border">
-          <button
-            onClick={() => { setMode('books'); setSelectedBook(null); setSelectedChapter(null); setMultiSelected(new Set()); }}
-            className="hover:text-primary transition-smooth"
-          >
-            Livres
-          </button>
-          {selectedBook && (
-            <>
-              <ChevronRight className="h-3 w-3" />
-              <button
-                onClick={() => { setMode('chapters'); setSelectedChapter(null); setMultiSelected(new Set()); }}
-                className="hover:text-primary transition-smooth"
-              >
-                {selectedBook}
-              </button>
-            </>
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Barre de navigation + recherche */}
+      <div className="shrink-0 px-2 pt-2 pb-1 space-y-2">
+        <div className="flex items-center gap-2">
+          {/* Bouton retour */}
+          {nav.view !== 'books' && nav.view !== 'search' && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                if (nav.view === 'verses') setNav({ view: 'chapters' });
+                else if (nav.view === 'chapters') setNav({ view: 'books', selectedBook: null });
+              }}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
           )}
-          {selectedChapter !== null && (
-            <>
-              <ChevronRight className="h-3 w-3" />
-              <span className="text-foreground">Chapitre {selectedChapter}</span>
-            </>
-          )}
-        </div>
-      )}
 
-      {/* Toolbar multi-sélection */}
-      {mode === 'verses' && (
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-secondary/30">
-          <button
-            onClick={handleSelectAll}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-smooth"
-          >
-            {allSelected
-              ? <CheckSquare2 className="h-3.5 w-3.5 text-primary" />
-              : <Square className="h-3.5 w-3.5" />
-            }
-            Tout sélectionner
-          </button>
-          {multiSelected.size > 0 && (
-            <span className="text-xs text-primary font-medium ml-auto">
-              {multiSelected.size} sélectionné{multiSelected.size > 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
-      )}
+          {/* Fil d'Ariane */}
+          <div className="flex-1 flex items-center gap-1 text-xs text-muted-foreground overflow-hidden">
+            <button onClick={() => setNav({ view: 'books', selectedBook: null, selectedChapter: null })}
+              className="hover:text-foreground transition-smooth shrink-0">
+              <BookMarked className="h-3.5 w-3.5 inline mr-0.5" />Bibles
+            </button>
+            {nav.selectedBook && (
+              <>
+                <ChevronRight className="h-3 w-3 shrink-0" />
+                <button
+                  onClick={() => nav.view === 'verses' && setNav({ view: 'chapters', selectedChapter: null })}
+                  className={cn('hover:text-foreground truncate transition-smooth', nav.view === 'chapters' && 'text-foreground font-medium')}
+                >
+                  {nav.selectedBook}
+                </button>
+              </>
+            )}
+            {nav.selectedChapter && nav.view === 'verses' && (
+              <>
+                <ChevronRight className="h-3 w-3 shrink-0" />
+                <span className="text-foreground font-medium">Ch.{nav.selectedChapter}</span>
+              </>
+            )}
+          </div>
 
-      {/* Contenu */}
-      <ScrollArea className="flex-1">
-        <div className="p-3">
-
-          {/* Mode recherche */}
-          {mode === 'search' && (
-            <div className="space-y-2">
-              {searchResults.length === 0 && searchQuery.length >= 2 && (
-                <p className="text-muted-foreground text-sm text-center py-4">Aucun résultat</p>
+          {/* Bouton double-version */}
+          {hasBible2 && (
+            <button
+              onClick={() => {
+                setDualMode(!dualMode);
+                if (dualMode) onSelectVerse2?.(null);
+              }}
+              title={`Mode double version ${dualMode ? 'actif' : 'inactif'}`}
+              className={cn(
+                'h-7 px-2 rounded-lg border text-[10px] font-medium flex items-center gap-1 shrink-0 transition-all',
+                dualMode
+                  ? 'border-primary/50 bg-primary/10 text-primary'
+                  : 'border-border/40 bg-secondary/40 text-muted-foreground hover:text-foreground'
               )}
-              {searchResults.map((r, i) => {
-                const projected = isSearchResultProjected(r);
-                return (
-                  <button
-                    key={i}
-                    onClick={() => onSelectVerse({ book: r.book, chapter: r.chapter, verse: r.verse, text: r.text })}
-                    onDoubleClick={(e) => {
-                      e.preventDefault();
-                      onProjectVerse?.({ book: r.book, chapter: r.chapter, verse: r.verse, text: r.text });
-                    }}
-                    title="Clic : aperçu — Double-clic : projeter"
-                    className={`w-full text-left p-3 rounded-lg border transition-smooth ${
-                      projected
-                        ? 'bg-primary/10 border-primary/40'
-                        : 'bg-secondary/60 border-transparent hover:bg-surface-hover hover:border-primary/20'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-primary font-semibold text-sm">
-                        {r.book} {r.chapter}:{r.verse}
-                      </span>
-                      {projected && (
-                        <span className="text-[10px] bg-primary text-primary-foreground px-1.5 py-0.5 rounded-full font-bold">
-                          ▶ EN COURS
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-foreground mt-1 line-clamp-2">
-                      <HighlightText text={r.text} query={searchQuery} />
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
+            >
+              <Layers2 className="h-3 w-3" />
+              {dualMode ? `FR + ${bible2Name}` : `+${bible2Name}`}
+            </button>
           )}
 
-          {/* Liste des livres — avec livres récents */}
-          {mode === 'books' && (
-            <div className="space-y-4">
-              {recentBooks.length > 0 && (
-                <div>
-                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70 uppercase tracking-widest mb-2">
-                    <Clock className="h-3 w-3" /> Récents
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {recentBooks.filter(b => availableBooks.includes(b)).map(book => (
-                      <button
-                        key={book}
-                        onClick={() => handleBookSelect(book)}
-                        className="px-2.5 py-1 text-xs rounded-full bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors"
-                      >
-                        {book}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+          {/* Bouton recherche */}
+          <button
+            onClick={() => {
+              if (nav.view === 'search') setNav({ view: 'books', searchQuery: '' });
+              else { setNav({ view: 'search' }); setTimeout(() => searchRef.current?.focus(), 50); }
+            }}
+            className={cn('h-7 w-7 rounded-lg border flex items-center justify-center transition-smooth shrink-0',
+              nav.view === 'search'
+                ? 'border-primary/50 bg-primary/10 text-primary'
+                : 'border-border/40 bg-secondary/40 text-muted-foreground hover:text-foreground'
+            )}
+            title="Recherche"
+          >
+            {nav.view === 'search' ? <X className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+
+        {/* Barre de recherche */}
+        {nav.view === 'search' && (
+          <Input
+            ref={searchRef}
+            value={nav.searchQuery}
+            onChange={e => setNav({ searchQuery: e.target.value })}
+            placeholder="Recherche dans la Bible…"
+            className="h-8 text-sm bg-secondary border-border/50"
+          />
+        )}
+
+        {/* Filtre alphabétique (vue livres uniquement) */}
+        {nav.view === 'books' && (
+          <div className="flex gap-1 flex-wrap">
+            <button
+              onClick={() => setNav({ alphaFilter: null })}
+              className={cn('px-2 py-0.5 rounded text-[10px] font-medium transition-smooth',
+                !nav.alphaFilter ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
               )}
-              <div className="grid grid-cols-2 gap-2">
-                {availableBooks.map(book => (
-                  <Button
-                    key={book}
-                    variant="secondary"
-                    className="h-12 justify-start text-sm font-medium transition-smooth hover:border-primary/20 border border-transparent"
-                    onClick={() => handleBookSelect(book)}
-                  >
-                    <BookOpen className="h-4 w-4 mr-2 text-primary shrink-0" />
-                    <span className="truncate">{book}</span>
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
+            >Tous</button>
+            {ALPHA_LETTERS.map(l => (
+              <button key={l}
+                onClick={() => setNav({ alphaFilter: nav.alphaFilter === l ? null : l })}
+                className={cn('px-2 py-0.5 rounded text-[10px] font-medium transition-smooth',
+                  nav.alphaFilter === l ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >{l}</button>
+            ))}
+          </div>
+        )}
 
-          {/* Liste des chapitres */}
-          {mode === 'chapters' && (
-            <div className="grid grid-cols-5 gap-2">
+        {/* Sélection multiple */}
+        {nav.view === 'verses' && (
+          <div className={cn(
+            'flex items-center gap-2 rounded-lg px-2 py-1.5 transition-smooth',
+            multiSelect ? 'bg-primary/10 border border-primary/30' : 'bg-transparent'
+          )}>
+            <button
+              onClick={() => { setMultiSelect(!multiSelect); setSelectedVerses([]); }}
+              className={cn(
+                'text-xs font-medium px-3 py-1.5 rounded-lg border transition-smooth',
+                multiSelect
+                  ? 'border-primary/60 bg-primary/20 text-primary'
+                  : 'border-border/50 bg-secondary/60 text-muted-foreground hover:text-foreground hover:bg-secondary/90'
+              )}
+            >
+              {multiSelect ? '✕ Annuler' : '☑ Sélection multiple'}
+            </button>
+            {multiSelect && selectedVerses.length > 0 && (
+              <>
+                <button
+                  onClick={() => setSelectedVerses([])}
+                  className="text-[10px] px-2 py-1 rounded border border-border/40 text-muted-foreground hover:text-foreground transition-smooth"
+                >
+                  Tout désélectionner
+                </button>
+                <button
+                  onClick={() => { onAddMultipleVerses?.(selectedVerses); setSelectedVerses([]); setMultiSelect(false); }}
+                  className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-smooth shadow-sm"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Ajouter {selectedVerses.length}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Zone de contenu */}
+      <div className="flex-1 overflow-y-auto px-2 pb-2">
+
+        {/* Vue : liste des livres */}
+        {nav.view === 'books' && (
+          <div className="grid grid-cols-2 gap-1.5">
+            {filteredBooks.map(book => {
+              const isNT = BIBLE_BOOKS.indexOf(book) >= 39;
+              return (
+                <button
+                  key={book}
+                  onClick={() => setNav({ view: 'chapters', selectedBook: book, selectedChapter: null, alphaFilter: null })}
+                  className="group flex items-center gap-2 px-3 py-2.5 rounded-lg border border-border/40 bg-secondary/40 hover:bg-secondary/80 hover:border-primary/30 transition-smooth text-left"
+                >
+                  <BookOpen className={cn('h-3.5 w-3.5 shrink-0', isNT ? 'text-blue-400' : 'text-amber-400')} />
+                  <span className="text-xs text-foreground truncate font-medium">{book}</span>
+                </button>
+              );
+            })}
+            {filteredBooks.length === 0 && (
+              <p className="col-span-2 text-center text-xs text-muted-foreground py-8">Aucun livre pour la lettre « {nav.alphaFilter} »</p>
+            )}
+          </div>
+        )}
+
+        {/* Vue : chapitres */}
+        {nav.view === 'chapters' && nav.selectedBook && (
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-foreground px-1">{nav.selectedBook}</h3>
+            <div className="grid grid-cols-5 sm:grid-cols-6 gap-1.5">
               {chapters.map(ch => (
-                <Button
+                <button
                   key={ch}
-                  variant="secondary"
-                  className="h-12 text-lg font-semibold transition-smooth hover:border-primary/20 border border-transparent hover:text-primary"
-                  onClick={() => handleChapterSelect(ch)}
+                  onClick={() => setNav({ view: 'verses', selectedChapter: ch })}
+                  className="h-10 rounded-lg border border-border/40 bg-secondary/40 hover:bg-secondary/80 hover:border-primary/30 text-sm font-medium text-foreground transition-smooth"
                 >
                   {ch}
-                </Button>
+                </button>
               ))}
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Liste des versets */}
-          {mode === 'verses' && bible && selectedBook && selectedChapter !== null && (
-            <div className="space-y-1.5">
-              {verses.map(v => {
-                const text = getVerseText(bible, selectedBook, selectedChapter, v);
-                const isSelected = multiSelected.has(v);
-                const projected = isCurrentlyProjected(v);
-                return (
-                  <div
-                    key={v}
-                    className={`flex items-start gap-2.5 p-3 rounded-lg border transition-smooth ${
-                      projected
-                        ? 'bg-primary/10 border-primary/40'
-                        : isSelected
-                          ? 'bg-primary/10 border-primary/30'
-                          : 'bg-secondary/60 border-transparent hover:bg-surface-hover hover:border-primary/20'
-                    }`}
-                  >
-                    <Checkbox
-                      checked={isSelected}
-                      onCheckedChange={() => toggleVerseSelection(v)}
-                      className="mt-0.5 shrink-0"
-                    />
-                    <button
-                      onClick={() => handleVerseSelect(v)}
-                      onDoubleClick={(e) => {
-                        e.preventDefault();
-                        if (onProjectVerse) {
-                          onProjectVerse({ book: selectedBook!, chapter: selectedChapter!, verse: v, text });
-                        }
-                      }}
-                      title="Clic : aperçu — Double-clic : projeter"
-                      className="flex-1 text-left"
-                    >
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <span className="text-primary font-bold">{v}</span>
-                        {projected && (
-                          <span className="text-[9px] bg-primary text-primary-foreground px-1 py-0.5 rounded-full font-bold leading-none">
-                            ▶
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-sm text-foreground">{text}</span>
-                    </button>
+        {/* Vue : versets */}
+        {nav.view === 'verses' && nav.selectedBook && nav.selectedChapter && (
+          <div className="space-y-1">
+            {verses.map(v => {
+              const text = getVerseText(bible!, nav.selectedBook!, nav.selectedChapter!, v);
+              const ref: VerseReference = { book: nav.selectedBook!, chapter: nav.selectedChapter!, verse: v, text };
+              const isProjected = currentProjectedVerse?.book === nav.selectedBook && currentProjectedVerse?.chapter === nav.selectedChapter && currentProjectedVerse?.verse === v;
+              const isSelected = multiSelect && selectedVerses.some(sv => sv.verse === v);
+              return (
+                <button
+                  key={v}
+                  onClick={() => {
+                    if (multiSelect) { toggleMultiSelect(ref); return; }
+                    handleSelectVerse(ref);
+                  }}
+                  onDoubleClick={() => !multiSelect && handleDoubleClickVerse(ref)}
+                  className={cn(
+                    'w-full text-left px-3 py-2.5 rounded-lg border transition-smooth',
+                    isProjected ? 'border-primary/60 bg-primary/10' : isSelected ? 'border-primary/40 bg-primary/5' : 'border-border/30 bg-secondary/30 hover:bg-secondary/70 hover:border-primary/20'
+                  )}
+                >
+                  <div className="flex items-start gap-2">
+                    <span className={cn('text-xs font-bold shrink-0 mt-0.5 w-6 text-right', isProjected ? 'text-primary' : 'text-muted-foreground')}>
+                      {v}
+                    </span>
+                    <span className="text-xs text-foreground leading-relaxed flex-1">{text}</span>
+                    {isProjected && <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0 mt-1.5 animate-pulse" />}
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </ScrollArea>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
-      {/* Barre d'action multi-sélection */}
-      {mode === 'verses' && multiSelected.size > 0 && onAddMultipleVerses && (
-        <div className="p-3 border-t border-border bg-primary/5">
-          <Button onClick={handleAddMultipleToQueue} className="w-full gap-2 btn-gold rounded-lg">
-            <ListPlus className="h-4 w-4" />
-            Ajouter {multiSelected.size} verset{multiSelected.size > 1 ? 's' : ''} à la timeline
-          </Button>
-        </div>
-      )}
+        {/* Vue : recherche */}
+        {nav.view === 'search' && (
+          <div className="space-y-1">
+            {nav.searchQuery.length < 2 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">Tapez au moins 2 caractères pour rechercher…</p>
+            ) : searchResults.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">Aucun résultat pour « {nav.searchQuery} »</p>
+            ) : (
+              <>
+                <p className="text-[10px] text-muted-foreground px-1 pb-1">{searchResults.length} résultat{searchResults.length > 1 ? 's' : ''}</p>
+                {searchResults.map((r, i) => {
+                  const ref: VerseReference = { book: r.book, chapter: r.chapter, verse: r.verse, text: r.text };
+                  return (
+                    <button key={i}
+                      onClick={() => handleSelectVerse(ref)}
+                      onDoubleClick={() => handleDoubleClickVerse(ref)}
+                      className="w-full text-left px-3 py-2.5 rounded-lg border border-border/30 bg-secondary/30 hover:bg-secondary/70 hover:border-primary/20 transition-smooth"
+                    >
+                      <div className="text-[10px] text-primary font-bold mb-1">{r.book} {r.chapter}:{r.verse}</div>
+                      <div className="text-xs text-foreground/80 leading-relaxed line-clamp-2">{r.text}</div>
+                    </button>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

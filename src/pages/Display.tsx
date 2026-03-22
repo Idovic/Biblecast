@@ -9,10 +9,10 @@ import { loadSettings, type ChurchSettings } from '@/components/SettingsPanel';
 import { Maximize2, Minimize2 } from 'lucide-react';
 
 const FONT_SIZE_MAP = {
-  small:  { cls: 'text-3xl',  clamp: 'clamp(1rem, 2.5vw, 1.875rem)' },
-  medium: { cls: 'text-4xl',  clamp: 'clamp(1.25rem, 3vw, 2.25rem)' },
-  large:  { cls: 'text-5xl',  clamp: 'clamp(1.5rem, 4vw, 3rem)' },
-  xlarge: { cls: 'text-6xl',  clamp: 'clamp(2rem, 5vw, 3.75rem)' },
+  small:  { clamp: 'clamp(1rem, 2.5vw, 1.875rem)' },
+  medium: { clamp: 'clamp(1.25rem, 3vw, 2.25rem)' },
+  large:  { clamp: 'clamp(1.5rem, 4vw, 3rem)' },
+  xlarge: { clamp: 'clamp(2rem, 5vw, 3.75rem)' },
 };
 
 const TITLE_SCALE: Record<string, string> = {
@@ -27,6 +27,13 @@ const REF_SCALE: Record<string, string> = {
   medium: 'clamp(0.875rem, 1.8vw, 1.25rem)',
   large: 'clamp(1rem, 2vw, 1.5rem)',
   xlarge: 'clamp(1.125rem, 2.5vw, 1.875rem)',
+};
+
+const SLIDE_FONT_SIZE: Record<string, string> = {
+  small:  'clamp(0.875rem, 2vw, 1.5rem)',
+  medium: 'clamp(1.125rem, 2.5vw, 2rem)',
+  large:  'clamp(1.5rem, 3.5vw, 2.75rem)',
+  xlarge: 'clamp(1.875rem, 4.5vw, 3.5rem)',
 };
 
 const DEFAULT_THEME: DisplayTheme = {
@@ -72,20 +79,39 @@ async function getManualVerse(ref: string): Promise<VerseReference | null> {
   } catch { return null; }
 }
 
+function formatClockTime(now: Date, showSeconds: boolean): string {
+  const h = String(now.getHours()).padStart(2, '0');
+  const m = String(now.getMinutes()).padStart(2, '0');
+  if (showSeconds) {
+    const s = String(now.getSeconds()).padStart(2, '0');
+    return `${h}:${m}:${s}`;
+  }
+  return `${h}:${m}`;
+}
+
+function formatClockDate(now: Date): string {
+  const days = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+  const months = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+    'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+  return `${days[now.getDay()]} ${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}`;
+}
+
 export default function Display() {
   const [searchParams] = useSearchParams();
   const roomCode = searchParams.get('room');
   const wsParam = searchParams.get('ws');
 
   const [verse, setVerse] = useState<VerseReference | null>(null);
+  const [verse2, setVerse2] = useState<VerseReference | null>(null);
   const [slide, setSlide] = useState<CustomSlide | null>(null);
   const [theme, setTheme] = useState<DisplayTheme>(() => getLastTheme() ?? DEFAULT_THEME);
   const [visible, setVisible] = useState(false);
-  const [mode, setMode] = useState<'empty' | 'verse' | 'slide'>('empty');
+  const [mode, setMode] = useState<'empty' | 'verse' | 'dual-verse' | 'slide'>('empty');
   const [settings, setSettings] = useState<ChurchSettings>(loadSettings);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [clockTime, setClockTime] = useState('');
+  const [clockDate, setClockDate] = useState('');
   const [verseOfDay, setVerseOfDay] = useState<VerseReference | null>(null);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -96,19 +122,19 @@ export default function Display() {
     return () => clearInterval(interval);
   }, []);
 
-  /* Horloge */
   useEffect(() => {
-    if (!settings.showClock) return;
+    if (!settings.showClock) { setClockTime(''); setClockDate(''); return; }
     const update = () => {
       const now = new Date();
-      setClockTime(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+      setClockTime(formatClockTime(now, !!settings.showClockSeconds));
+      if (settings.showClockDate) setClockDate(formatClockDate(now));
+      else setClockDate('');
     };
     update();
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  }, [settings.showClock]);
+  }, [settings.showClock, settings.showClockSeconds, settings.showClockDate]);
 
-  /* Verset du jour */
   useEffect(() => {
     if (!settings.showVerseOfDay) { setVerseOfDay(null); return; }
     if (settings.verseOfDayMode === 'manual' && settings.verseOfDayRef) {
@@ -118,7 +144,6 @@ export default function Display() {
     }
   }, [settings.showVerseOfDay, settings.verseOfDayMode, settings.verseOfDayRef]);
 
-  /* Auto-hide controls */
   const resetControlsTimer = useCallback(() => {
     setShowControls(true);
     if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
@@ -136,7 +161,6 @@ export default function Display() {
     };
   }, [resetControlsTimer]);
 
-  /* Fullscreen state sync */
   useEffect(() => {
     const handler = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handler);
@@ -151,12 +175,13 @@ export default function Display() {
     }
   }, []);
 
-  /* Restaure le dernier contenu projeté sans animation */
   const restoreImmediate = useCallback((msg: DisplayMessage) => {
     if (msg.type === 'show-verse' && msg.verse) {
-      setVerse(msg.verse); setSlide(null); setMode('verse'); setVisible(true);
+      setVerse(msg.verse); setVerse2(null); setSlide(null); setMode('verse'); setVisible(true);
+    } else if (msg.type === 'show-dual-verse' && msg.verse) {
+      setVerse(msg.verse); setVerse2(msg.verse2 || null); setSlide(null); setMode('dual-verse'); setVisible(true);
     } else if (msg.type === 'show-slide' && msg.slide) {
-      setSlide(msg.slide); setVerse(null); setMode('slide'); setVisible(true);
+      setSlide(msg.slide); setVerse(null); setVerse2(null); setMode('slide'); setVisible(true);
     }
   }, []);
 
@@ -169,14 +194,17 @@ export default function Display() {
   const handleMessage = useCallback((msg: DisplayMessage) => {
     if (msg.type === 'show-verse' && msg.verse) {
       setVisible(false);
-      setTimeout(() => { setVerse(msg.verse!); setSlide(null); setMode('verse'); setVisible(true); }, 300);
+      setTimeout(() => { setVerse(msg.verse!); setVerse2(null); setSlide(null); setMode('verse'); setVisible(true); }, 300);
+    } else if (msg.type === 'show-dual-verse' && msg.verse) {
+      setVisible(false);
+      setTimeout(() => { setVerse(msg.verse!); setVerse2(msg.verse2 || null); setSlide(null); setMode('dual-verse'); setVisible(true); }, 300);
     } else if (msg.type === 'show-slide' && msg.slide) {
       setVisible(false);
-      setTimeout(() => { setSlide(msg.slide!); setVerse(null); setMode('slide'); setVisible(true); }, 300);
+      setTimeout(() => { setSlide(msg.slide!); setVerse(null); setVerse2(null); setMode('slide'); setVisible(true); }, 300);
     } else if (msg.type === 'clear') {
       setVisible(false);
       setTimeout(() => {
-        setVerse(null); setSlide(null); setMode('empty');
+        setVerse(null); setVerse2(null); setSlide(null); setMode('empty');
         setTimeout(() => setVisible(true), 50);
       }, 400);
     } else if (msg.type === 'theme-change' && msg.theme) {
@@ -188,7 +216,6 @@ export default function Display() {
   const peerState = usePeerGuest(roomCode, handleMessage);
   const localWsState = useLocalWsGuest(wsParam, handleMessage);
 
-  /* Cast Receiver SDK — initialisé en premier si on tourne sur un Chromecast */
   useEffect(() => {
     const w = window as any;
     if (!w.cast?.framework?.CastReceiverContext) return;
@@ -200,9 +227,8 @@ export default function Display() {
       };
       context.start();
     } catch { }
-  }, []); // handleMessage est stable (useCallback)
+  }, []);
 
-  /* B4 — Swipe left/right pour avancer/reculer */
   useEffect(() => {
     const onTouchStart = (e: TouchEvent) => {
       touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -228,7 +254,6 @@ export default function Display() {
   const fontFamily = theme.fontFamily === 'serif' ? 'font-serif' : 'font-sans';
   const fontSize = FONT_SIZE_MAP[theme.fontSize];
 
-  /* Styles de fond — séparés du texte pour le blur */
   const bgImageStyle: React.CSSProperties = {};
   if (mode === 'slide' && slide) {
     if (slide.backgroundImage) {
@@ -239,7 +264,7 @@ export default function Display() {
     } else if (slide.backgroundColor) {
       bgImageStyle.backgroundColor = slide.backgroundColor;
     }
-  } else if (mode === 'verse' && theme.verseBackgroundImage) {
+  } else if ((mode === 'verse' || mode === 'dual-verse') && theme.verseBackgroundImage) {
     bgImageStyle.backgroundImage = `url(${theme.verseBackgroundImage})`;
     bgImageStyle.backgroundSize = 'cover'; bgImageStyle.backgroundPosition = 'center';
   } else if (mode === 'empty') {
@@ -252,7 +277,7 @@ export default function Display() {
   }
 
   const hasBgImage = !!(bgImageStyle.backgroundImage);
-  const showLogo = (mode === 'verse' && theme.showChurchLogo) || (mode === 'slide' && !!slide?.showLogo);
+  const showLogo = ((mode === 'verse' || mode === 'dual-verse') && theme.showChurchLogo) || (mode === 'slide' && !!slide?.showLogo);
   const slideType: SlideType = slide?.slideType || 'text-title';
   const defaultFg = 'hsl(var(--display-fg))';
   const fg = (mode === 'slide' && slide?.textColor) ? slide.textColor : defaultFg;
@@ -267,13 +292,13 @@ export default function Display() {
   };
 
   const baseTextShadow = settings.textShadowDefault ? '0 2px 12px rgba(0,0,0,0.8)' : undefined;
+  const splitLayout = settings.splitLayout ?? 'horizontal';
 
   return (
     <div
       className={`h-screen w-screen overflow-hidden cursor-none relative flex items-center justify-center ${theme.className}`}
       style={{ backgroundColor: hasBgImage ? undefined : `hsl(var(--display-bg) / ${theme.bgOpacity})`, color: fg }}
     >
-      {/* Couche fond — peut être floutée indépendamment */}
       <div
         className="absolute inset-0 z-0"
         style={{
@@ -286,55 +311,71 @@ export default function Display() {
         }}
       />
 
-      {/* Overlay sombre sur fond image ou veille */}
       {(hasBgImage || mode === 'empty') && (
         <div className="absolute inset-0 z-[1] bg-black/35" />
       )}
 
-      {/* Logo d'église en overlay */}
-      {showLogo && settings.churchLogo && (
+      {showLogo && (theme.churchLogo || settings.churchLogo) && (
         <div className="absolute top-6 left-1/2 -translate-x-1/2 z-20">
-          <img src={settings.churchLogo} alt="Logo" className="h-16 object-contain opacity-90 drop-shadow-lg" />
+          <img src={theme.churchLogo || settings.churchLogo} alt="Logo" className="h-16 object-contain opacity-90 drop-shadow-lg" />
         </div>
       )}
 
-      {/* Indicateur de connexion PeerJS */}
-      {roomCode && (
+      {roomCode && peerState.status !== 'idle' && (
         <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm border"
           style={{
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            borderColor: peerState.isConnected ? 'rgba(74,222,128,0.4)' : 'rgba(251,191,36,0.4)',
-            color: peerState.isConnected ? '#4ade80' : '#fbbf24',
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            borderColor: peerState.status === 'connected'
+              ? 'rgba(74,222,128,0.4)'
+              : peerState.status === 'connecting'
+              ? 'rgba(251,191,36,0.35)'
+              : 'rgba(239,68,68,0.4)',
+            color: peerState.status === 'connected' ? '#4ade80'
+              : peerState.status === 'connecting' ? '#fbbf24'
+              : '#f87171',
           }}
         >
-          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: peerState.isConnected ? '#4ade80' : '#fbbf24', animation: 'pulse 2s infinite' }} />
-          {peerState.isConnected ? 'Connecté' : 'Reconnexion…'}
+          <span className="h-2 w-2 rounded-full" style={{
+            backgroundColor: peerState.status === 'connected' ? '#4ade80'
+              : peerState.status === 'connecting' ? '#fbbf24' : '#f87171',
+            animation: peerState.status === 'connected' ? 'none' : 'pulse 2s infinite',
+          }} />
+          {peerState.status === 'connected' ? 'Connecté'
+            : peerState.status === 'connecting' ? 'Connexion en cours…'
+            : 'Connexion perdue'}
           {peerState.status === 'error' && (
-            <button
-              onClick={peerState.forceReconnect}
-              className="ml-1 underline underline-offset-2 hover:opacity-70 transition-opacity"
-            >
+            <button onClick={peerState.forceReconnect} className="ml-1.5 px-2 py-0.5 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-[10px] font-semibold">
               Réessayer
             </button>
           )}
         </div>
       )}
 
-      {/* Indicateur connexion WebSocket local (mode hors-ligne) */}
-      {wsParam && (
+      {wsParam && localWsState.status !== 'idle' && (
         <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm border"
           style={{
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            borderColor: localWsState.isConnected ? 'rgba(74,222,128,0.4)' : 'rgba(251,191,36,0.4)',
-            color: localWsState.isConnected ? '#4ade80' : '#fbbf24',
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            borderColor: localWsState.status === 'connected'
+              ? 'rgba(74,222,128,0.4)'
+              : localWsState.status === 'connecting'
+              ? 'rgba(251,191,36,0.35)'
+              : 'rgba(239,68,68,0.4)',
+            color: localWsState.status === 'connected' ? '#4ade80'
+              : localWsState.status === 'connecting' ? '#fbbf24'
+              : '#f87171',
           }}
         >
-          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: localWsState.isConnected ? '#4ade80' : '#fbbf24', animation: 'pulse 2s infinite' }} />
-          {localWsState.isConnected ? 'Local connecté' : 'Connexion locale…'}
+          <span className="h-2 w-2 rounded-full" style={{
+            backgroundColor: localWsState.status === 'connected' ? '#4ade80'
+              : localWsState.status === 'connecting' ? '#fbbf24' : '#f87171',
+            animation: localWsState.status === 'connected' ? 'none' : 'pulse 2s infinite',
+          }} />
+          {localWsState.status === 'connected' ? 'Local connecté'
+            : localWsState.status === 'connecting' ? 'Connexion locale…'
+            : 'Connexion locale perdue'}
         </div>
       )}
 
-      {/* Bouton plein écran (auto-hide) */}
       <button
         onClick={toggleFullscreen}
         className="fixed bottom-4 left-4 z-50 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm border border-white/20 text-white/60 hover:text-white/90 hover:bg-white/10 transition-all"
@@ -344,13 +385,10 @@ export default function Display() {
         {isFullscreen ? 'Quitter' : 'Plein écran'}
       </button>
 
-      {/* Contenu — z-10 pour passer au-dessus du fond */}
-
       {/* État vide — écran de veille */}
       {mode === 'empty' && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-between py-16 px-8" style={transitionStyle}>
 
-          {/* Haut : logo + nom */}
           <div className="text-center">
             {settings.churchLogo && (
               <img src={settings.churchLogo} alt="Logo"
@@ -364,38 +402,46 @@ export default function Display() {
             )}
           </div>
 
-          {/* Centre : verset du jour */}
           {settings.showVerseOfDay && verseOfDay && (
-            <div className="text-center max-w-4xl px-8 space-y-5">
+            <div className="text-center w-full max-w-[85vw] px-8 space-y-5">
               <p className="text-xs uppercase tracking-[0.3em] font-medium opacity-60" style={{ color: fg }}>
                 — Verset du jour —
               </p>
               <p className="leading-relaxed opacity-90 font-serif"
                 style={{
                   color: fg,
-                  fontSize: 'clamp(1.1rem, 2.5vw, 1.875rem)',
+                  fontSize: 'clamp(1.1rem, 2.5vw, 2rem)',
                   textShadow: '0 2px 24px rgba(0,0,0,0.7)',
                 }}>
                 « {verseOfDay.text} »
               </p>
               <p className="opacity-65 font-semibold tracking-widest uppercase"
-                style={{ color: fg, fontSize: 'clamp(0.8rem, 1.3vw, 1rem)', textShadow: '0 1px 8px rgba(0,0,0,0.5)' }}>
+                style={{ color: fg, fontSize: 'clamp(0.8rem, 1.5vw, 1.125rem)', textShadow: '0 1px 8px rgba(0,0,0,0.5)' }}>
                 {formatReference(verseOfDay)}
               </p>
             </div>
           )}
 
-          {/* Bas : horloge + crédit */}
-          <div className="text-center space-y-3">
+          <div className="text-center space-y-2">
             {settings.showClock && clockTime && (
               <p className="font-bold tabular-nums tracking-tight opacity-80"
                 style={{
                   color: fg,
-                  fontSize: 'clamp(3rem, 10vw, 6rem)',
+                  fontSize: 'clamp(3rem, 10vw, 7rem)',
                   textShadow: '0 4px 40px rgba(0,0,0,0.6)',
                   fontFamily: 'monospace',
                 }}>
                 {clockTime}
+              </p>
+            )}
+            {settings.showClock && settings.showClockDate && clockDate && (
+              <p className="opacity-60 tracking-wider"
+                style={{
+                  color: fg,
+                  fontSize: 'clamp(0.875rem, 2vw, 1.5rem)',
+                  textShadow: '0 2px 12px rgba(0,0,0,0.5)',
+                }}>
+                {clockDate}
               </p>
             )}
             <p className="text-[10px] opacity-[0.06]" style={{ color: fg }}>
@@ -406,9 +452,9 @@ export default function Display() {
         </div>
       )}
 
-      {/* Verset */}
+      {/* Verset simple */}
       {mode === 'verse' && verse && (
-        <div className={`relative z-10 text-center max-w-5xl px-12 ${fontFamily}`} style={transitionStyle}>
+        <div className={`relative z-10 text-center w-full max-w-[88vw] px-12 ${fontFamily}`} style={transitionStyle}>
           <p
             style={{
               fontSize: fontSize.clamp,
@@ -427,12 +473,77 @@ export default function Display() {
         </div>
       )}
 
-      {/* Slide — rendu selon le type */}
+      {/* Double verset — split-screen */}
+      {mode === 'dual-verse' && verse && (
+        <div
+          className={`relative z-10 w-full max-w-[92vw] h-full flex items-center ${splitLayout === 'vertical' ? 'flex-row gap-0' : 'flex-col gap-0'}`}
+          style={transitionStyle}
+        >
+          {/* Panneau 1 — version principale */}
+          <div
+            className={`flex flex-col items-center justify-center text-center px-10 py-10 ${fontFamily} ${splitLayout === 'vertical' ? 'flex-1 border-r border-white/15' : 'flex-1 border-b border-white/15'}`}
+          >
+            <p
+              style={{
+                fontSize: `clamp(1rem, ${splitLayout === 'vertical' ? '2.5vw' : '3.5vw'}, 2.25rem)`,
+                lineHeight: settings.lineSpacing === 'tight' ? 1.3 : settings.lineSpacing === 'relaxed' ? 1.9 : 1.6,
+                color: fg,
+                textShadow: baseTextShadow,
+              }}
+            >
+              {settings.verseQuotes ? `« ${verse.text} »` : verse.text}
+            </p>
+            {settings.showVerseReference && (
+              <p className="mt-5 font-semibold tracking-wide opacity-75"
+                style={{ fontSize: 'clamp(0.75rem, 1.5vw, 1.125rem)', color: fg }}>
+                {formatReference(verse)} — {settings.bibleVersion || 'LSG'}
+              </p>
+            )}
+          </div>
+
+          {/* Panneau 2 — version secondaire */}
+          {verse2 && (
+            <div
+              className={`flex flex-col items-center justify-center text-center px-10 py-10 ${fontFamily} flex-1`}
+            >
+              <p
+                style={{
+                  fontSize: `clamp(1rem, ${splitLayout === 'vertical' ? '2.5vw' : '3.5vw'}, 2.25rem)`,
+                  lineHeight: settings.lineSpacing === 'tight' ? 1.3 : settings.lineSpacing === 'relaxed' ? 1.9 : 1.6,
+                  color: fg,
+                  opacity: 0.88,
+                  textShadow: baseTextShadow,
+                }}
+              >
+                {settings.verseQuotes ? `« ${verse2.text} »` : verse2.text}
+              </p>
+              {settings.showVerseReference && (
+                <p className="mt-5 font-semibold tracking-wide opacity-75"
+                  style={{ fontSize: 'clamp(0.75rem, 1.5vw, 1.125rem)', color: fg }}>
+                  {formatReference(verse2)} — {settings.bible2Version || 'BDS'}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Slide */}
       {mode === 'slide' && slide && (
-        <div className={`relative z-10 text-center max-w-5xl px-12 ${fontFamily}`} style={{ ...transitionStyle, textShadow: textShadowStyle }}>
+        <div
+          className={`relative z-10 w-full max-w-[92vw] px-12 ${fontFamily}`}
+          style={{
+            ...transitionStyle,
+            textShadow: textShadowStyle,
+            textAlign: slide.textAlign ?? 'center',
+          }}
+        >
+          {slideType === 'image-full' && (
+            <div />
+          )}
 
           {slideType === 'title-only' && (
-            <h2 style={{ fontSize: fontSize.clamp, fontWeight: 700, lineHeight: 1.2, color: fg }}>
+            <h2 style={{ fontSize: SLIDE_FONT_SIZE[slide.fontSize ?? theme.fontSize], fontWeight: 700, lineHeight: 1.2, color: fg }}>
               {slide.title}
             </h2>
           )}
@@ -440,29 +551,29 @@ export default function Display() {
           {slideType === 'text-title' && (
             <>
               {slide.title && (
-                <h2 className="font-bold mb-6" style={{ fontSize: TITLE_SCALE[theme.fontSize], color: fg }}>{slide.title}</h2>
+                <h2 className="font-bold mb-6" style={{ fontSize: TITLE_SCALE[slide.titleFontSize ?? slide.fontSize ?? theme.fontSize], color: fg }}>{slide.title}</h2>
               )}
-              <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: fontSize.clamp, color: fgDim }}>{slide.content}</p>
+              <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: SLIDE_FONT_SIZE[slide.fontSize ?? theme.fontSize], color: fgDim }}>{slide.content}</p>
             </>
           )}
 
           {slideType === 'verse-title' && (
             <>
               {slide.title && (
-                <h2 className="font-bold mb-8 tracking-wide uppercase" style={{ fontSize: REF_SCALE[theme.fontSize], color: fgDim }}>{slide.title}</h2>
+                <h2 className="font-bold mb-8 tracking-wide uppercase" style={{ fontSize: REF_SCALE[slide.titleFontSize ?? slide.fontSize ?? theme.fontSize], color: fgDim }}>{slide.title}</h2>
               )}
-              <p className="leading-relaxed font-serif" style={{ fontSize: fontSize.clamp, color: fg }}>« {slide.content} »</p>
+              <p className="leading-relaxed font-serif" style={{ fontSize: SLIDE_FONT_SIZE[slide.fontSize ?? theme.fontSize], color: fg }}>« {slide.content} »</p>
             </>
           )}
 
           {slideType === 'bullet-list' && (
             <>
               {slide.title && (
-                <h2 className="font-bold mb-10" style={{ fontSize: TITLE_SCALE[theme.fontSize], color: fg }}>{slide.title}</h2>
+                <h2 className="font-bold mb-10" style={{ fontSize: TITLE_SCALE[slide.titleFontSize ?? slide.fontSize ?? theme.fontSize], color: fg }}>{slide.title}</h2>
               )}
-              <ul className="text-left inline-block space-y-5">
+              <ul className={slide.textAlign === 'left' ? 'inline-block space-y-5' : slide.textAlign === 'right' ? 'inline-block space-y-5 text-right' : 'inline-block space-y-5'}>
                 {(slide.bullets || []).filter(Boolean).map((b, i) => (
-                  <li key={i} className="flex items-start gap-4" style={{ fontSize: fontSize.clamp, color: fgDim }}>
+                  <li key={i} className="flex items-start gap-4" style={{ fontSize: SLIDE_FONT_SIZE[slide.fontSize ?? theme.fontSize], color: fgDim }}>
                     <span className="mt-1 opacity-70" style={{ color: fg }}>•</span>
                     <span>{b}</span>
                   </li>
