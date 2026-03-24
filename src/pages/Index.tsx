@@ -1,6 +1,7 @@
 /* Page principale — Mode Présentateur */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Monitor, BookOpen, Image, Layout, Settings, MonitorOff } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -173,9 +174,9 @@ export default function Index() {
     setSelectedVerse2(verse);
   }, []);
 
-  const handleSelectSlide = useCallback((slide: CustomSlide) => {
+  const handleSelectSlide = useCallback((slide: CustomSlide | null) => {
     setSelectedSlide(slide);
-    setSelectedVerse(null);
+    if (slide !== null) setSelectedVerse(null);
   }, []);
 
   const handleProjectVerse = useCallback((verse: VerseReference) => {
@@ -456,14 +457,16 @@ export default function Index() {
             >
               <Settings className="h-4 w-4" />
             </Button>
-            <Button
-              size="sm" variant="secondary"
-              className="gap-2 transition-smooth border border-border/50 hover:border-primary/30"
-              onClick={() => window.open(`${import.meta.env.BASE_URL}display?room=${peer.roomCode}`, '_blank')}
-            >
-              <Monitor className="h-4 w-4" />
-              Ouvrir l'écran
-            </Button>
+            {!Capacitor.isNativePlatform() && (
+              <Button
+                size="sm" variant="secondary"
+                className="gap-2 transition-smooth border border-border/50 hover:border-primary/30"
+                onClick={() => window.open(`${import.meta.env.BASE_URL}display?room=${peer.roomCode}`, '_blank')}
+              >
+                <Monitor className="h-4 w-4" />
+                Ouvrir l'écran
+              </Button>
+            )}
           </div>
         </header>
 

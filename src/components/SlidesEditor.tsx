@@ -363,9 +363,6 @@ export default function SlidesEditor({ slides, onChange, onProjectSlide, current
   const [showTemplates, setShowTemplates] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const editingSlide = slides.find(s => s.id === editingId) ?? null;
-  void editingSlide;
-
   const openEditing = (id: string | null) => {
     setEditingId(id);
     setExpandedEdit(false);
