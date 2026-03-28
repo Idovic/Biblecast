@@ -72,10 +72,7 @@ export function useLocalServer(): LocalServerState {
         console.warn('[LocalServer] démarrage échoué:', err);
         if (!cancelled) {
           const cached = getCachedIP();
-          if (cached) {
-            setLocalIP(cached);
-            setIsServerRunning(true);
-          }
+          if (cached) setLocalIP(cached);
         }
       }
     })();

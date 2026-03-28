@@ -11,7 +11,8 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
 const App = () => {
-  const basename = Capacitor.isNativePlatform() ? '/' : import.meta.env.BASE_URL;
+  const rawBase = import.meta.env.BASE_URL as string;
+  const basename = (Capacitor.isNativePlatform() || rawBase.startsWith('.')) ? '/' : rawBase;
   return (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
