@@ -25,6 +25,7 @@ export default function CastButton({
   const [copied, setCopied] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedOffline, setCopiedOffline] = useState(false);
+  const [copiedOfflineFull, setCopiedOfflineFull] = useState(false);
   const [savedOfflineUrl, setSavedOfflineUrl] = useState<string | null>(() => {
     try { return localStorage.getItem(SAVED_OFFLINE_URL_KEY); } catch { return null; }
   });
@@ -34,6 +35,10 @@ export default function CastButton({
 
   const offlineUrl = localServer?.httpUrl
     ? `${localServer.httpUrl}/display?local=1`
+    : null;
+
+  const offlineUrlFull = localServer?.httpUrl && localServer?.wsEncodedUrl
+    ? `${localServer.httpUrl}/display?ws=${localServer.wsEncodedUrl}`
     : null;
 
   const displayedOfflineUrl = offlineUrl ?? savedOfflineUrl;
@@ -60,6 +65,15 @@ export default function CastButton({
       await navigator.clipboard.writeText(displayedOfflineUrl);
       setCopiedOffline(true);
       setTimeout(() => setCopiedOffline(false), 2000);
+    } catch { }
+  };
+
+  const handleCopyOfflineFullUrl = async () => {
+    if (!offlineUrlFull) return;
+    try {
+      await navigator.clipboard.writeText(offlineUrlFull);
+      setCopiedOfflineFull(true);
+      setTimeout(() => setCopiedOfflineFull(false), 2000);
     } catch { }
   };
 
@@ -259,20 +273,40 @@ export default function CastButton({
                     )}
 
                     {displayedOfflineUrl && (
-                      <div className="space-y-2">
-                        <p className="text-xs text-muted-foreground">Adresse Display (Hors-ligne)</p>
-                        <div className="flex items-center gap-2">
-                          <p className="flex-1 text-[10px] text-muted-foreground/60 break-all font-mono bg-secondary/40 rounded-lg px-3 py-2">
-                            {displayedOfflineUrl}
-                          </p>
-                          <button
-                            onClick={handleCopyOfflineUrl}
-                            className="h-9 w-9 rounded-lg border border-border/40 bg-secondary/60 flex items-center justify-center text-muted-foreground hover:text-foreground transition-smooth shrink-0"
-                            title="Copier l'URL"
-                          >
-                            {copiedOffline ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
-                          </button>
+                      <div className="space-y-3">
+                        <div className="space-y-1.5">
+                          <p className="text-xs text-muted-foreground font-medium">Adresse courte <span className="text-primary/70">(recommandée)</span></p>
+                          <div className="flex items-center gap-2">
+                            <p className="flex-1 text-[10px] text-foreground break-all font-mono bg-secondary/60 border border-border/40 rounded-lg px-3 py-2">
+                              {displayedOfflineUrl}
+                            </p>
+                            <button
+                              onClick={handleCopyOfflineUrl}
+                              className="h-9 w-9 rounded-lg border border-border/40 bg-secondary/60 flex items-center justify-center text-muted-foreground hover:text-foreground transition-smooth shrink-0"
+                              title="Copier l'adresse courte"
+                            >
+                              {copiedOffline ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
+                            </button>
+                          </div>
                         </div>
+
+                        {offlineUrlFull && (
+                          <div className="space-y-1.5">
+                            <p className="text-xs text-muted-foreground font-medium">Adresse complète <span className="text-muted-foreground/60">(format original)</span></p>
+                            <div className="flex items-center gap-2">
+                              <p className="flex-1 text-[10px] text-muted-foreground/70 break-all font-mono bg-secondary/40 rounded-lg px-3 py-2">
+                                {offlineUrlFull}
+                              </p>
+                              <button
+                                onClick={handleCopyOfflineFullUrl}
+                                className="h-9 w-9 rounded-lg border border-border/40 bg-secondary/60 flex items-center justify-center text-muted-foreground hover:text-foreground transition-smooth shrink-0"
+                                title="Copier l'adresse complète"
+                              >
+                                {copiedOfflineFull ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
+                              </button>
+                            </div>
+                          </div>
+                        )}
 
                         {offlineUrl && (
                           <button

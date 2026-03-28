@@ -35,6 +35,7 @@ export interface LocalServerState {
   localIP: string | null;
   httpUrl: string | null;
   wsUrl: string | null;
+  wsEncodedUrl: string | null;
   sendToWs: (msg: DisplayMessage) => void;
 }
 
@@ -88,6 +89,7 @@ export function useLocalServer(): LocalServerState {
 
   const httpUrl = localIP ? `http://${localIP}:${HTTP_PORT}` : null;
   const wsUrl = localIP ? `ws://${localIP}:${WS_PORT}` : null;
+  const wsEncodedUrl = wsUrl ? encodeURIComponent(wsUrl) : null;
 
-  return { isNative, isServerRunning, localIP, httpUrl, wsUrl, sendToWs };
+  return { isNative, isServerRunning, localIP, httpUrl, wsUrl, wsEncodedUrl, sendToWs };
 }
