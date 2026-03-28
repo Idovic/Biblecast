@@ -74,21 +74,28 @@ public class LocalServerPlugin extends Plugin {
 
     private String resolveLocalIP() {
         try {
-            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
+            String wifiIp = null;
             String fallback = null;
-            while (interfaces != null && interfaces.hasMoreElements()) {
-                NetworkInterface iface = interfaces.nextElement();
+            while (ifaces != null && ifaces.hasMoreElements()) {
+                NetworkInterface iface = ifaces.nextElement();
                 if (!iface.isUp() || iface.isLoopback()) continue;
+                String name = iface.getName().toLowerCase();
+                boolean isHotspot = name.startsWith("ap") || name.startsWith("swlan") || name.startsWith("p2p");
                 Enumeration<InetAddress> addrs = iface.getInetAddresses();
                 while (addrs.hasMoreElements()) {
                     InetAddress addr = addrs.nextElement();
                     if (!(addr instanceof Inet4Address) || addr.isLoopbackAddress()) continue;
                     String ip = addr.getHostAddress();
                     if (ip == null) continue;
-                    if (ip.startsWith("192.168.43.")) return ip;
-                    if (fallback == null) fallback = ip;
+                    if ((name.equals("wlan0") || (name.startsWith("wlan") && !isHotspot)) && wifiIp == null) {
+                        wifiIp = ip;
+                    } else if (!isHotspot && fallback == null) {
+                        fallback = ip;
+                    }
                 }
             }
+            if (wifiIp != null) return wifiIp;
             if (fallback != null) return fallback;
         } catch (Exception ignored) { }
         return "127.0.0.1";

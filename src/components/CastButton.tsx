@@ -145,7 +145,7 @@ export default function CastButton({
                       )}
                     >
                       <WifiOff className="h-3.5 w-3.5" />
-                      Hors-ligne (Hotspot)
+                      Hors-ligne (WiFi local)
                       {localServer.isServerRunning && (
                         <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
                       )}
@@ -302,10 +302,10 @@ export default function CastButton({
                     <div className="bg-secondary/40 rounded-xl p-4 space-y-2 text-xs text-muted-foreground">
                       <p className="font-semibold text-foreground text-[11px] uppercase tracking-wide">Projeter sans Internet</p>
                       {[
-                        'Activez le Hotspot Wi-Fi de la tablette (Paramètres Android)',
-                        'Connectez la TV au réseau Wi-Fi de la tablette',
-                        'Sur la TV, ouvrez Chrome et scannez le QR code',
-                        'Appuyez sur "Mémoriser" pour garder l\'adresse d\'un culte à l\'autre',
+                        'Connectez la tablette ET la TV au même réseau WiFi (box ou routeur)',
+                        'Les deux appareils doivent être sur le même réseau — sans internet requis',
+                        'Sur la TV, ouvrez Chrome et scannez le QR code ou tapez l\'adresse',
+                        'Mémorisez l\'adresse sur la TV (Favoris) — stable sur le même réseau WiFi',
                       ].map((step, i) => (
                         <div key={i} className="flex gap-2.5">
                           <span className="h-4 w-4 rounded-full bg-primary/20 text-primary text-[10px] flex items-center justify-center shrink-0 font-bold mt-0.5">{i + 1}</span>

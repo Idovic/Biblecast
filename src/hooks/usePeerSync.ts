@@ -1,7 +1,10 @@
 /* PeerJS WebRTC sync + WebSocket local — communication cross-device (TV, Android TV) */
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Peer, { type DataConnection } from 'peerjs';
+import { Capacitor } from '@capacitor/core';
 import type { DisplayMessage } from '@/types/bible';
+
+const PROD_WEB_URL = 'https://idovic.github.io/Biblecast/';
 
 const PEER_ID_PREFIX = 'biblecast-';
 const ROOM_STORAGE_KEY = 'biblecast:peer-room';
@@ -140,8 +143,9 @@ export function usePeerHost(onGuestMessage?: (msg: DisplayMessage) => void): Pee
     };
   }, [roomCode]);
 
-  const basePath = (import.meta.env.BASE_URL as string) ?? '/';
-  const displayUrl = `${window.location.origin}${basePath}display?room=${roomCode}`;
+  const displayUrl = Capacitor.isNativePlatform()
+    ? `${PROD_WEB_URL}display?room=${roomCode}`
+    : `${window.location.origin}${(import.meta.env.BASE_URL as string) ?? '/'}display?room=${roomCode}`;
 
   return { roomCode, displayUrl, connectedCount, isReady, peerSend };
 }
